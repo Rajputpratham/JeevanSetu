@@ -20,6 +20,7 @@ export default function Footer() {
             <h3 className="text-white font-bold text-sm uppercase tracking-wider">{t('footerColPlatform')}</h3>
             <ul className="mt-3 space-y-2 text-sm">
               <li><Link href="/hospitals" className="hover:text-white hover:underline">{t('footerLinkFind')}</Link></li>
+              <li><Link href="/rankings" className="hover:text-white hover:underline">{t('navRankings')}</Link></li>
               <li><Link href="/recommendations" className="hover:text-white hover:underline">{t('footerLinkRecommend')}</Link></li>
               <li><Link href="/cost-estimator" className="hover:text-white hover:underline">{t('footerLinkCost')}</Link></li>
               <li><Link href="/compare" className="hover:text-white hover:underline">{t('footerLinkCompare')}</Link></li>

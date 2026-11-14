@@ -6,6 +6,7 @@ import {
   ChevronRight, ShieldCheck, Languages, Wifi, HeartPulse,
 } from 'lucide-react';
 import QuickSearch from '@/components/home/QuickSearch';
+import NearbySection from '@/components/home/NearbySection';
 import { useLang, DictKey } from '@/lib/i18n';
 
 const FEATURES: {
@@ -33,8 +34,8 @@ const FEATURES: {
     href: '/compare', tint: 'bg-sky-100 text-sky-800',
   },
   {
-    icon: FileText, titleKey: 'feat5Title', descKey: 'feat5Desc', ctaKey: 'feat5Cta',
-    href: '/hospitals', tint: 'bg-emerald-100 text-emerald-800',
+    icon: FileText, titleKey: 'rankingsTitle', descKey: 'rankingsSub', ctaKey: 'navRankings',
+    href: '/rankings', tint: 'bg-emerald-100 text-emerald-800',
   },
   {
     icon: Siren, titleKey: 'feat6Title', descKey: 'feat6Desc', ctaKey: 'feat6Cta',
@@ -103,6 +104,9 @@ export default function HomeClient() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 -mt-2 lg:-mt-6 relative z-10">
         <QuickSearch />
       </div>
+
+      {/* ─── LIVE NEARBY HOSPITALS ────────────────────────────── */}
+      <NearbySection />
 
       {/* ─── SIX FEATURE CARDS ────────────────────────────────── */}
       <section aria-labelledby="features-heading" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-14 pb-8">

@@ -5,6 +5,7 @@ import { Search, MapPin } from 'lucide-react';
 import { ALL_SPECIALITIES } from '@/data/hospitals';
 import { useLang } from '@/lib/i18n';
 import { tSpeciality } from '@/lib/i18n-data';
+import VoiceSearchButton from '@/components/VoiceSearchButton';
 
 export default function QuickSearch() {
   const router = useRouter();
@@ -26,10 +27,13 @@ export default function QuickSearch() {
 
   return (
     <form onSubmit={submit} className="card p-3 sm:p-4 flex flex-col md:flex-row gap-2 md:items-center" role="search" aria-label={t('searchFormAria')}>
-      <div className="relative flex-1">
-        <Search size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+      <div className="relative flex-1 flex items-center">
+        <Search size={20} className="absolute left-4 text-slate-400 pointer-events-none" aria-hidden="true" />
         <label htmlFor="qs-q" className="sr-only">{t('searchPlaceholder')}</label>
-        <input id="qs-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('searchPlaceholder')} className="input !pl-12" autoComplete="off" />
+        <input id="qs-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('searchPlaceholder')} className="input !pl-12 !pr-11" autoComplete="off" />
+        <div className="absolute right-1.5">
+          <VoiceSearchButton onTranscript={(txt) => setQ(txt)} />
+        </div>
       </div>
       <div className="relative md:w-64">
         <MapPin size={20} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" aria-hidden="true" />

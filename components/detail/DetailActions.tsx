@@ -1,15 +1,20 @@
 'use client';
 import Link from 'next/link';
-import { PhoneCall, Navigation, GitCompareArrows, Check } from 'lucide-react';
+import { PhoneCall, Navigation, GitCompareArrows, Check, Bookmark } from 'lucide-react';
 import { useCompare } from '@/lib/compare';
+import { useSavedHospitals } from '@/lib/saved';
+import { useUserLocation } from '@/lib/useLocation';
 import { directionsUrl } from '@/lib/geo';
 import { Hospital } from '@/data/types';
 import { useLang } from '@/lib/i18n';
 
 export default function DetailActions({ hospital }: { hospital: Hospital }) {
   const { t } = useLang();
+  const { location } = useUserLocation();
   const { has, toggle, full } = useCompare();
+  const { isSaved, toggleSaved } = useSavedHospitals();
   const inCompare = has(hospital.id);
+  const saved = isSaved(hospital.id);
 
   return (
     <div className="flex flex-col gap-2.5">
@@ -27,15 +32,51 @@ export default function DetailActions({ hospital }: { hospital: Hospital }) {
           </p>
         </div>
       )}
-      <a href={directionsUrl(hospital.lat, hospital.lng, hospital.shortName)} target="_blank" rel="noopener noreferrer" className="btn-secondary !text-lg !py-4">
+      <a
+        href={directionsUrl(hospital.lat, hospital.lng, hospital.shortName, {
+          lat: location.lat,
+          lng: location.lng,
+        })}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="btn-secondary !text-lg !py-4"
+      >
         <Navigation size={22} strokeWidth={2.5} /> {t('getDirections')}
       </a>
-      <button type="button" onClick={() => toggle(hospital.id)} aria-pressed={inCompare}
-        className={`btn !text-base !py-3.5 border-2 ${inCompare ? 'border-brand-700 bg-brand-700 text-white' : 'border-slate-200 text-slate-700 hover:border-brand-600'}`}>
-        {inCompare ? <Check size={19} strokeWidth={3} /> : <GitCompareArrows size={19} />}
-        {inCompare ? t('addedToComparison') : full ? t('comparisonFullMax3') : t('addToCompare')}
-      </button>
-      <Link href="/compare" className="text-center text-sm font-bold text-brand-800 hover:underline py-1">{t('openComparisonLink')}</Link>
+
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => toggle(hospital.id)}
+          aria-pressed={inCompare}
+          className={`btn !text-sm !py-3 border-2 ${
+            inCompare
+              ? 'border-brand-700 bg-brand-700 text-white'
+              : 'border-slate-200 text-slate-700 hover:border-brand-600'
+          }`}
+        >
+          {inCompare ? <Check size={17} strokeWidth={3} /> : <GitCompareArrows size={17} />}
+          {inCompare ? t('inCompare') : full ? t('comparisonFullMax3') : t('compareBtn')}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => toggleSaved(hospital.id)}
+          aria-pressed={saved}
+          className={`btn !text-sm !py-3 border-2 ${
+            saved
+              ? 'border-amber-500 bg-amber-50 text-amber-900'
+              : 'border-slate-200 text-slate-700 hover:border-amber-500'
+          }`}
+        >
+          <Bookmark size={17} className={saved ? 'fill-amber-500 text-amber-600' : ''} />
+          {saved ? t('savedLabel') : t('saveHospital')}
+        </button>
+      </div>
+
+      <Link href="/compare" className="text-center text-sm font-bold text-brand-800 hover:underline py-1">
+        {t('openComparisonLink')}
+      </Link>
     </div>
   );
 }

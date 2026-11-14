@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HOSPITALS, ALL_SPECIALITIES } from '@/data/hospitals';
 import { recommendHospitals, specialityForProblem } from '@/lib/recommend';
+import { isValidLang } from '@/lib/lang-meta';
 
 export const dynamic = 'force-dynamic';
 
 export function GET(request: NextRequest) {
   try {
     const sp = request.nextUrl.searchParams;
-    const lang = sp.get('lang') === 'hi' ? 'hi' : 'en';
+    const langRaw = sp.get('lang') ?? 'en';
+    const lang = isValidLang(langRaw) ? langRaw : 'en';
     const problem = (sp.get('problem') ?? '').trim();
     let speciality = sp.get('speciality') ?? '';
     if (!speciality && problem) speciality = specialityForProblem(problem) ?? '';

@@ -1,12 +1,15 @@
 'use client';
 /**
- * JeevanSetu language support — English (en) and Hindi (hi).
+ * JeevanSetu language support — 11 languages (English + 10 Indian languages, including RTL Urdu).
  * Full interface coverage across all pages, dialogs, filters, cards,
  * alerts, error messages, loading states, and accessibility labels.
  */
 import { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
+import { Lang, SUPPORTED_LANGUAGES, getLangMeta, isValidLang } from './lang-meta';
+import { EXTRA_UI_DICTS } from './languages-extra';
 
-export type Lang = 'en' | 'hi';
+export type { Lang };
+export { SUPPORTED_LANGUAGES, getLangMeta, isValidLang };
 
 const en = {
   // Global / layout / chrome
@@ -528,6 +531,26 @@ const en = {
   backToHome: 'Back to home',
   findHospitalsShort: 'Find hospitals',
   emergency112Short: 'Emergency 112',
+
+  // New platform modules (Rankings, Ratings, Traffic ETA, Voice Search, Saved, AI Chatbot)
+  navRankings: 'Rankings',
+  filterSortRating: 'Highest Community Score',
+  rankingsEyebrow: 'Transparent Leaderboard',
+  rankingsTitle: 'Hospital Rankings & Leaderboards',
+  rankingsSub: 'Transparent composite ranking combining verified facilities, speciality depth, 24×7 emergency capability, affordability, and IMDb-style Bayesian community scores.',
+  communityScoreLabel: 'JeevanSetu Community Score',
+  googleRatingLabel: 'Google Rating',
+  etaLabel: 'Est. Travel Time',
+  roadDistLabel: 'Road Distance',
+  savedLabel: 'Saved',
+  saveHospital: 'Save',
+  voiceSearchAria: 'Search by voice',
+  chatTitle: 'JeevanSetu AI Assistant',
+  chatSubtitle: 'Grounded in verified hospital, travel & tariff data',
+  chatPlaceholder: 'Ask e.g. nearby government hospitals, ETA or delivery cost…',
+  chatSend: 'Send',
+  writeReviewTitle: 'Share your hospital visit experience',
+  submitReviewBtn: 'Submit Community Review',
 };
 
 const hi: Record<keyof typeof en, string> = {
@@ -1050,13 +1073,51 @@ const hi: Record<keyof typeof en, string> = {
   backToHome: 'होम पर वापस जाएं',
   findHospitalsShort: 'अस्पताल खोजें',
   emergency112Short: 'आपातकाल 112',
+
+  // New platform modules
+  navRankings: 'रैंकिंग',
+  filterSortRating: 'उच्चतम कम्युनिटी स्कोर',
+  rankingsEyebrow: 'पारदर्शी लीडरबोर्ड',
+  rankingsTitle: 'अस्पताल रैंकिंग और लीडरबोर्ड',
+  rankingsSub: 'सत्यापित सुविधाओं, विशेषज्ञता विभागों, 24×7 आपातकालीन क्षमता, किफ़ायती खर्च और IMDb-शैली बेयसियन कम्युनिटी स्कोर पर आधारित पारदर्शी रैंकिंग।',
+  communityScoreLabel: 'JeevanSetu कम्युनिटी स्कोर',
+  googleRatingLabel: 'Google रेटिंग',
+  etaLabel: 'अनुमानित यात्रा समय',
+  roadDistLabel: 'सड़क दूरी',
+  savedLabel: 'सहेजे गए',
+  saveHospital: 'सहेजें',
+  voiceSearchAria: 'आवाज़ से खोजें',
+  chatTitle: 'JeevanSetu AI सहायक',
+  chatSubtitle: 'सत्यापित अस्पताल, यात्रा समय व खर्च डेटा पर आधारित',
+  chatPlaceholder: 'पूछें: जैसे पास के सरकारी अस्पताल, यात्रा समय या प्रसव खर्च…',
+  chatSend: 'भेजें',
+  writeReviewTitle: 'अपने अस्पताल अनुभव को साझा करें',
+  submitReviewBtn: 'कम्युनिटी रिव्यू सबमिट करें',
 };
 
-export const dict = { en, hi } as const;
 export type DictKey = keyof typeof en;
+
+const buildFullDict = (overlay: Record<string, string>): Record<DictKey, string> => {
+  return { ...en, ...overlay } as Record<DictKey, string>;
+};
+
+export const dict: Record<Lang, Record<DictKey, string>> = {
+  en,
+  hi,
+  bn: buildFullDict(EXTRA_UI_DICTS.bn),
+  te: buildFullDict(EXTRA_UI_DICTS.te),
+  mr: buildFullDict(EXTRA_UI_DICTS.mr),
+  ta: buildFullDict(EXTRA_UI_DICTS.ta),
+  gu: buildFullDict(EXTRA_UI_DICTS.gu),
+  ur: buildFullDict(EXTRA_UI_DICTS.ur),
+  kn: buildFullDict(EXTRA_UI_DICTS.kn),
+  or: buildFullDict(EXTRA_UI_DICTS.or),
+  ml: buildFullDict(EXTRA_UI_DICTS.ml),
+};
 
 interface LangCtx {
   lang: Lang;
+  dir: 'ltr' | 'rtl';
   setLang: (l: Lang) => void;
   t: (key: DictKey, vars?: Record<string, string | number>) => string;
 }
@@ -1068,6 +1129,7 @@ const formatVars = (str: string, vars?: Record<string, string | number>) => {
 
 const Ctx = createContext<LangCtx>({
   lang: 'en',
+  dir: 'ltr',
   setLang: () => {},
   t: (k, vars) => formatVars(en[k], vars),
 });
@@ -1079,27 +1141,37 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE);
-      if (saved === 'hi' || saved === 'en') {
+      if (isValidLang(saved)) {
+        const meta = getLangMeta(saved);
         setLangState(saved);
         document.documentElement.lang = saved;
+        document.documentElement.dir = meta.dir;
       }
     } catch { /* private mode */ }
   }, []);
 
   const setLang = useCallback((l: Lang) => {
+    if (!isValidLang(l)) return;
+    const meta = getLangMeta(l);
     setLangState(l);
     try {
       window.localStorage.setItem(STORAGE, l);
-      document.documentElement.lang = l === 'hi' ? 'hi' : 'en';
+      document.documentElement.lang = l;
+      document.documentElement.dir = meta.dir;
     } catch { /* ignore */ }
   }, []);
 
   const t = useCallback(
-    (key: DictKey, vars?: Record<string, string | number>) => formatVars(dict[lang][key] ?? en[key], vars),
+    (key: DictKey, vars?: Record<string, string | number>) => {
+      const table = dict[lang] ?? en;
+      return formatVars(table[key] ?? en[key], vars);
+    },
     [lang],
   );
 
-  return <Ctx.Provider value={{ lang, setLang, t }}>{children}</Ctx.Provider>;
+  const dir = getLangMeta(lang).dir;
+
+  return <Ctx.Provider value={{ lang, dir, setLang, t }}>{children}</Ctx.Provider>;
 }
 
 export function useLang() {

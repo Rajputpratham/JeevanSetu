@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { TREATMENTS, getTreatmentById } from '@/data/treatments';
 import { estimateTreatment, RoomType } from '@/lib/cost-estimate';
+import { isValidLang } from '@/lib/lang-meta';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,10 +33,10 @@ export async function POST(request: NextRequest) {
       includedTests?: number[];
       stayDays?: number;
       roomType?: RoomType;
-      lang?: 'en' | 'hi';
+      lang?: string;
     };
 
-    const safeLang = lang === 'hi' ? 'hi' : 'en';
+    const safeLang = isValidLang(lang) ? lang : 'en';
     const treatment = treatmentId ? getTreatmentById(treatmentId) : undefined;
     if (!treatment) {
       return NextResponse.json({ error: safeLang === 'hi' ? 'अज्ञात इलाज' : 'Unknown treatment' }, { status: 400 });
