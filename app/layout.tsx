@@ -4,9 +4,10 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { LanguageProvider } from '@/lib/i18n';
 import { CompareProvider } from '@/lib/compare';
+import { SITE_URL } from '@/lib/site';
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://www.jeevansetu.in'),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: 'JeevanSetu — Find the Right Hospital Near You | Free Healthcare Assistance India',
     template: '%s | JeevanSetu',
