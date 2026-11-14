@@ -8,20 +8,23 @@ import { ALL_SPECIALITIES, HOSPITALS } from '@/data/hospitals';
 import { useLang } from '@/lib/i18n';
 import { tCity, tSpeciality, tState } from '@/lib/i18n-data';
 import { useUserLocation } from '@/lib/useLocation';
+import LocationControls from '@/components/LocationControls';
 import { useCompare } from '@/lib/compare';
-import { directionsUrl, formatDistance, formatDuration } from '@/lib/geo';
+import { directionsUrl, formatDrivingKm as formatDriving, formatDuration } from '@/lib/geo';
+import { locationStrings } from '@/lib/ui-strings';
 import type { RankedHospitalEntry } from '@/lib/ratings';
 
 type LeaderboardRow = RankedHospitalEntry & {
-  roadKm: number;
-  etaMinutes: number;
+  /** Google road distance; null when unknown (never modelled). */
+  roadKm: number | null;
+  etaMinutes: number | null;
 };
 
 const ALL_CITIES = Array.from(new Set(HOSPITALS.map((h) => h.city))).sort();
 
 export default function RankingsClient() {
   const { t, lang } = useLang();
-  const { location } = useUserLocation();
+  const { location, hasLocation } = useUserLocation();
   const { has, toggle } = useCompare();
 
   const [city, setCity] = useState('');
@@ -35,9 +38,12 @@ export default function RankingsClient() {
     let cancelled = false;
     const params = new URLSearchParams({
       type,
-      lat: String(location.lat),
-      lng: String(location.lng),
     });
+    // Deliberately omit lat/lng when unknown: the API must not assume Delhi.
+    if (hasLocation) {
+      params.set('lat', String(location.lat));
+      params.set('lng', String(location.lng));
+    }
     if (city) params.set('city', city);
     if (speciality) params.set('speciality', speciality);
     if (emergencyOnly) params.set('emergency', '1');
@@ -56,12 +62,15 @@ export default function RankingsClient() {
     return () => {
       cancelled = true;
     };
-  }, [city, type, speciality, emergencyOnly, location.lat, location.lng]);
+  }, [city, type, speciality, emergencyOnly, hasLocation, location.lat, location.lng]);
 
   const topThree = useMemo(() => (rows ?? []).slice(0, 3), [rows]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
+      <div className="mb-4">
+        <LocationControls compact />
+      </div>
       <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-brand-700 flex items-center gap-1.5">
@@ -198,7 +207,8 @@ export default function RankingsClient() {
                       </span>
                     )}
                     <span className="chip-grey">
-                      {formatDistance(entry.roadKm, lang)} · ~{formatDuration(entry.etaMinutes, lang)}
+                      {formatDriving(entry.roadKm, lang) ?? locationStrings(lang).notSet}
+                      {typeof entry.etaMinutes === 'number' && ` · ~${formatDuration(entry.etaMinutes, lang)}`}
                     </span>
                   </div>
                 </div>
@@ -302,20 +312,35 @@ export default function RankingsClient() {
                       {b.affordabilityPts}/15 · Comm {b.communityPts}/15
                     </td>
                     <td className="px-4 py-3.5 text-xs">
-                      <span className="font-bold text-slate-900 block">
-                        {formatDistance(entry.roadKm, lang)}
-                      </span>
-                      <span className="text-slate-500 inline-flex items-center gap-1">
-                        <Clock size={11} /> ~{formatDuration(entry.etaMinutes, lang)}
-                      </span>
+                      {typeof entry.roadKm === 'number' ? (
+                        <>
+                          <span
+                            className="font-bold text-slate-900 block"
+                            data-testid="ranking-distance"
+                          >
+                            {formatDriving(entry.roadKm, lang) ?? '—'}
+                          </span>
+                          <span className="text-slate-500 inline-flex items-center gap-1">
+                            <Clock size={11} /> ~{formatDuration(entry.etaMinutes, lang)}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="text-[11px] text-slate-400">
+                          Share your location to see driving distance
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2">
                         <a
-                          href={directionsUrl(h.lat, h.lng, h.shortName, {
-                            lat: location.lat,
-                            lng: location.lng,
-                          })}
+                          href={directionsUrl(
+                            h.lat,
+                            h.lng,
+                            h.shortName,
+                            typeof location.lat === 'number' && typeof location.lng === 'number'
+                              ? { lat: location.lat, lng: location.lng }
+                              : null,
+                          )}
                           target="_blank"
                           rel="noopener noreferrer"
                           aria-label={`Directions to ${h.shortName}`}

@@ -3,28 +3,33 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Sparkles, PhoneCall, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { useUserLocation } from '@/lib/useLocation';
-import { formatDistance } from '@/lib/geo';
+import { formatDrivingKm } from '@/lib/geo';
 
 interface RecItem {
   hospital: { id: string; name: string; type: 'government' | 'private'; phone: string | null; emergency: string; shortName: string };
-  distanceKm: number;
+  /** Google Routes driving distance, or null when no origin has been shared. */
+  distanceKm: number | null;
+  etaMinutes?: number | null;
   reasons: string[];
   cautions: string[];
 }
 
 export default function RecommendedSection() {
-  const { location } = useUserLocation();
+  const { location, hasLocation } = useUserLocation();
   const [items, setItems] = useState<RecItem[] | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/recommendations?speciality=General%20Medicine&type=any&budget=low&lat=${location.lat}&lng=${location.lng}`)
+    const query = hasLocation
+      ? `/api/recommendations?speciality=General%20Medicine&type=any&budget=low&lat=${location.lat}&lng=${location.lng}`
+      : '/api/recommendations?speciality=General%20Medicine&type=any&budget=low';
+    fetch(query)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error())))
       .then((data) => { if (!cancelled) setItems((data.results ?? []).slice(0, 3)); })
       .catch(() => { if (!cancelled) setFailed(true); });
     return () => { cancelled = true; };
-  }, [location.lat, location.lng]);
+  }, [location.lat, location.lng, hasLocation]);
 
   return (
     <section aria-labelledby="rec-heading" className="bg-brand-50/60 border-y border-brand-100">
@@ -50,7 +55,11 @@ export default function RecommendedSection() {
               <div key={hospital.id} className="card p-5 flex flex-col">
                 <div className="flex items-center gap-2 text-brand-700"><Sparkles size={16} aria-hidden="true" /><span className="text-[11px] font-bold uppercase tracking-wider">{reasons.length} match reasons</span></div>
                 <h3 className="mt-1.5 font-bold text-slate-900 leading-snug"><Link href={`/hospitals/${hospital.id}`} className="hover:text-brand-800 hover:underline">{hospital.shortName}</Link></h3>
-                <p className="text-xs text-slate-500 mt-0.5">{hospital.type === 'government' ? 'Government' : 'Private'} · {formatDistance(distanceKm)} away</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {hospital.type === 'government' ? 'Government' : 'Private'}
+                  {' · '}
+                  {formatDrivingKm(distanceKm) ? `${formatDrivingKm(distanceKm)} driving distance` : 'share your location for driving distance'}
+                </p>
                 <ul className="mt-2.5 space-y-1 text-[13px] text-slate-700">
                   {reasons.slice(0, 3).map((r) => (
                     <li key={r} className="flex items-start gap-1.5"><CheckCircle2 size={13} className="mt-0.5 text-green-700 shrink-0" />{r}</li>

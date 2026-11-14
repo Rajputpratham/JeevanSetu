@@ -37,9 +37,12 @@ body {
   .label { @apply block text-sm font-semibold text-slate-700 mb-1.5; }
 }
 
-/* Leaflet map container — keep LTR inside map controls even when page is RTL (Urdu) */
-.leaflet-container { border-radius: 1rem; z-index: 0; font-family: inherit; direction: ltr; }
-.leaflet-popup-content-wrapper { border-radius: 0.75rem; }
+/* Google Maps container — keep LTR inside map controls even when the page is RTL (Urdu).
+   Google renders its own controls; forcing direction:ltr here stops the Urdu page
+   from mirroring the zoom/streetview controls into unusable positions. */
+.gm-style { direction: ltr; }
+.gm-style .gm-style-iw-c { border-radius: 0.75rem; }
+[data-testid='google-map'] { border-radius: 1rem; }
 .js-map-marker { background: transparent; border: none; }
 
 /* RTL polish for Urdu (dir="rtl") */
@@ -54,7 +57,7 @@ html[dir="rtl"] a[href^="tel:"] {
 
 /* Comparison table print styles */
 @media print {
-  header, footer, nav, .print-hidden, .leaflet-container { display: none !important; }
+  header, footer, nav, .print-hidden, [data-testid='google-map'], [data-testid='map-key-missing'] { display: none !important; }
   body { background: #fff; }
   .card { box-shadow: none; border: 1px solid #cbd5e1; }
   .print-only { display: block !important; }
@@ -64,4 +67,29 @@ html[dir="rtl"] a[href^="tel:"] {
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ── JeevanSetu AI Assistant — audio waveform ───────────────────────────── */
+@keyframes js-wave {
+  0%, 100% { height: 5px; }
+  50% { height: 15px; }
+}
+.js-wave-bar {
+  height: 6px;
+  animation-name: js-wave;
+  animation-iteration-count: infinite;
+  animation-timing-function: ease-in-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .js-wave-bar { animation: none !important; height: 8px; }
+}
+
+/* ── Google Maps info windows inherit brand typography ───────────────────── */
+.gm-style-iw {
+  font-family: inherit;
+}
+
+/* ── Assistant panel scroll area on very short screens ──────────────────── */
+@media (max-height: 640px) {
+  [data-testid='assistant-panel'] { max-height: calc(100dvh - 0.5rem); }
 }

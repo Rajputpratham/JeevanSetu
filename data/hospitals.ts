@@ -1,4 +1,5 @@
 import { Hospital } from './types';
+import { HOSPITAL_GEO } from './hospital-locations';
 
 /**
  * JeevanSetu hospital dataset.
@@ -14,7 +15,7 @@ import { Hospital } from './types';
  * Every phone number below is a publicly listed hospital switchboard number.
  * Numbers can change — always cross-check before an emergency visit.
  */
-export const HOSPITALS: Hospital[] = [
+const RAW_HOSPITALS: Hospital[] = [
   // ─────────────────────────── DELHI NCR — GOVERNMENT ───────────────────────────
   {
     id: 'aiims-new-delhi',
@@ -695,6 +696,30 @@ export const HOSPITALS: Hospital[] = [
     dataNote: 'Kerala government subsidised rates; NABH-accredited public facility.',
   },
 ];
+
+/**
+ * PUBLIC HOSPITAL DATASET — the only array the app reads.
+ *
+ * Every record is normalised through the verified coordinate registry so that
+ * NOTHING can route to a stray campus point any more:
+ *   • coordinates come from `data/hospital-locations.ts`
+ *   • the corrected street address replaces the known-wrong listing
+ *   • `geoConfidence` travels with the record so the UI can label accuracy
+ *
+ * This is the structural fix for the "same hospital, two different distances"
+ * class of bug: one object in, one object out, for every consumer.
+ */
+export const HOSPITALS: Hospital[] = RAW_HOSPITALS.map((h) => {
+  const geo = HOSPITAL_GEO[h.id];
+  return {
+    ...h,
+    lat: geo?.lat ?? h.lat,
+    lng: geo?.lng ?? h.lng,
+    address: geo?.addressOverride ?? h.address,
+    geoConfidence: geo?.confidence ?? 'approximate',
+    placeId: geo?.placeId ?? null,
+  };
+});
 
 export function getHospitalById(id: string): Hospital | undefined {
   return HOSPITALS.find((h) => h.id === id);

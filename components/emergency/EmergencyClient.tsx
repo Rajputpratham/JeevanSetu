@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   PhoneCall, Navigation, Siren, CheckCircle2, AlertOctagon,
@@ -7,7 +7,8 @@ import {
 } from 'lucide-react';
 import { useUserLocation, CITY_PRESETS } from '@/lib/useLocation';
 import { HOSPITALS } from '@/data/hospitals';
-import { directionsUrl, estimateTravelMetrics, formatDistance, formatDuration, TrafficLevel } from '@/lib/geo';
+import { directionsUrl, formatDrivingKm, formatDuration } from '@/lib/geo';
+import { distanceStrings, locationStrings } from '@/lib/ui-strings';
 import { HELPLINES } from '@/data/helplines';
 import { Hospital } from '@/data/types';
 import { useLang, DictKey } from '@/lib/i18n';
@@ -15,49 +16,53 @@ import { HELPLINE_HI, tCity, tHospitalMeta, tPresetLabel } from '@/lib/i18n-data
 import VoiceSearchButton from '@/components/VoiceSearchButton';
 
 type EmergencyHospital = Hospital & {
-  distanceKm: number;
-  roadKm: number;
-  etaMinutes: number;
-  trafficLevel?: TrafficLevel;
+  /** Google Routes driving distance (null = unknown, never guessed). */
+  distanceKm: number | null;
+  roadKm: number | null;
+  straightKm?: number | null;
+  etaMinutes: number | null;
+  trafficImpactMinutes?: number | null;
+  travelSource?: string;
 };
 
 const STEP_KEYS: DictKey[] = ['emStep1', 'emStep2', 'emStep3', 'emStep4', 'emStep5', 'emStep6'];
 
 export default function EmergencyClient() {
   const { t, lang } = useLang();
-  const { location, setManual, requestGeolocation, status: geoStatus, errorCode } = useUserLocation();
+  const { location, hasLocation, setManual, requestGeolocation, status: geoStatus, errorCode } = useUserLocation();
   const [hospitals, setHospitals] = useState<EmergencyHospital[] | null>(null);
   const [verifiedOnly, setVerifiedOnly] = useState(true);
   const [offlineFallbackUsed, setOfflineFallbackUsed] = useState(false);
   const [manualQuery, setManualQuery] = useState('');
   const [manualBusy, setManualBusy] = useState(false);
 
-  // Compute local deterministic fallback so even if /api/emergency fails or is offline, life-critical listings still render!
-  const computeLocalFallback = () => {
-    return HOSPITALS.filter((h) => h.emergency === 'verified' || h.emergency === 'unverified')
-      .map((h) => {
-        const tr = estimateTravelMetrics(location.lat, location.lng, h.lat, h.lng);
-        return {
-          ...h,
-          distanceKm: tr.roadKm,
-          roadKm: tr.roadKm,
-          etaMinutes: tr.trafficMinutes,
-          trafficLevel: tr.trafficLevel,
-        };
-      })
-      .sort((a, b) =>
-        a.emergency === b.emergency
-          ? a.roadKm - b.roadKm
-          : a.emergency === 'verified'
-            ? -1
-            : 1,
-      );
-  };
+  /**
+   * Offline fallback: still list life-critical hospitals, but WITHOUT invented
+   * distances. A wrong ETA in an emergency is worse than an honest "unknown".
+   */
+  const computeLocalFallback = useCallback(() =>
+    HOSPITALS.filter((h) => h.emergency === 'verified' || h.emergency === 'unverified')
+      .map((h) => ({
+        ...h,
+        distanceKm: null,
+        roadKm: null,
+        straightKm: null,
+        etaMinutes: null,
+        trafficImpactMinutes: null,
+        travelSource: 'unavailable',
+      }))
+      .sort((a, b) => (a.emergency === b.emergency ? 0 : a.emergency === 'verified' ? -1 : 1)),
+  []);
 
   useEffect(() => {
     let cancelled = false;
     setHospitals(null);
     setOfflineFallbackUsed(false);
+    if (!hasLocation) {
+      setOfflineFallbackUsed(true);
+      setHospitals(computeLocalFallback());
+      return;
+    }
     fetch(`/api/emergency?lat=${location.lat}&lng=${location.lng}&lang=${lang}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error())))
       .then((d) => {
@@ -72,8 +77,7 @@ export default function EmergencyClient() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.lat, location.lng, lang]);
+  }, [hasLocation, location.lat, location.lng, lang, computeLocalFallback]);
 
   const applyManualOrigin = async () => {
     const q = manualQuery.trim();
@@ -98,12 +102,13 @@ export default function EmergencyClient() {
     [hospitals, verifiedOnly],
   );
 
-  const locationDisplay =
-    location.source === 'geolocation'
+  const ds = distanceStrings(lang);
+  const ls = locationStrings(lang);
+  const locationDisplay = hasLocation
+    ? location.source === 'geolocation'
       ? t('emYourCurrentLoc')
-      : location.source === 'default'
-        ? t('defaultLocationLabel')
-        : tPresetLabel(location.label, lang);
+      : tPresetLabel(location.label, lang)
+    : ls.notSet;
 
   return (
     <div>
@@ -363,12 +368,31 @@ export default function EmergencyClient() {
                         <p className="mt-1 text-xs text-slate-500">{h.address}</p>
                       </div>
                       <div className="text-right shrink-0">
-                        <p className="text-lg font-extrabold text-brand-800 leading-none">
-                          {formatDistance(h.roadKm ?? h.distanceKm, lang)}
-                        </p>
-                        <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-900">
-                          <Clock size={11} /> ~{formatDuration(h.etaMinutes, lang)}
-                        </span>
+                        {formatDrivingKm(h.roadKm ?? h.distanceKm, lang) ? (
+                          <>
+                            <p
+                              className="text-lg font-extrabold text-brand-800 leading-none"
+                              data-testid={`em-distance-${h.id}`}
+                            >
+                              {formatDrivingKm(h.roadKm ?? h.distanceKm, lang)}
+                            </p>
+                            <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                              <Clock size={11} /> ~{formatDuration(h.etaMinutes, lang)}
+                            </span>
+                            {typeof h.trafficImpactMinutes === 'number' && h.trafficImpactMinutes > 0 && (
+                              <p className="mt-0.5 text-[10px] font-semibold text-amber-900">
+                                {ds.trafficImpact}: +{h.trafficImpactMinutes} min
+                              </p>
+                            )}
+                          </>
+                        ) : (
+                          <p
+                            className="max-w-[110px] text-[11px] font-bold leading-tight text-amber-800"
+                            data-testid={`em-distance-unavailable-${h.id}`}
+                          >
+                            {hasLocation ? ds.distanceUnavailable : ls.notSet}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <p className="mt-2 text-[11px]">
@@ -400,10 +424,14 @@ export default function EmergencyClient() {
                         </a>
                       )}
                       <a
-                        href={directionsUrl(h.lat, h.lng, h.shortName, {
-                          lat: location.lat,
-                          lng: location.lng,
-                        })}
+                        href={directionsUrl(
+                          h.lat,
+                          h.lng,
+                          h.shortName,
+                          hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
+                            ? { lat: location.lat, lng: location.lng }
+                            : null,
+                        )}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="inline-flex items-center gap-2 border-2 border-brand-700 text-brand-800 font-bold rounded-xl px-4 py-2.5 text-sm min-h-[44px] hover:bg-brand-50"

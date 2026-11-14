@@ -33,10 +33,14 @@ export default function DetailActions({ hospital }: { hospital: Hospital }) {
         </div>
       )}
       <a
-        href={directionsUrl(hospital.lat, hospital.lng, hospital.shortName, {
-          lat: location.lat,
-          lng: location.lng,
-        })}
+        href={directionsUrl(
+          hospital.lat,
+          hospital.lng,
+          hospital.shortName,
+          typeof location.lat === 'number' && typeof location.lng === 'number'
+            ? { lat: location.lat, lng: location.lng }
+            : null,
+        )}
         target="_blank"
         rel="noopener noreferrer"
         className="btn-secondary !text-lg !py-4"

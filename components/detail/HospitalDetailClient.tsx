@@ -9,18 +9,15 @@ import {
 import { Hospital } from '@/data/types';
 import DetailActions from '@/components/detail/DetailActions';
 import RatingsSection from '@/components/detail/RatingsSection';
-import MapViewClient from '@/components/MapViewClient';
 import VerificationChip from '@/components/VerificationChip';
 import { useLang, DictKey } from '@/lib/i18n';
 import { tFacility, tHospitalMeta, tPresetLabel, tSpeciality } from '@/lib/i18n-data';
 import { useUserLocation } from '@/lib/useLocation';
-import {
-  directionsFromToUrl,
-  estimateTravelMetrics,
-  formatDistance,
-  formatDuration,
-} from '@/lib/geo';
-import type { RouteResult } from '@/lib/routing';
+import LocationControls from '@/components/LocationControls';
+import MapPanel from '@/components/maps/MapPanel';
+import { formatDrivingKm, formatDuration, directionsFromToUrl, formatStraightLineKm, haversineKm } from '@/lib/geo';
+import { distanceStrings, locationStrings } from '@/lib/ui-strings';
+import type { RouteDetailPayload } from '@/components/hospitals/DiscoveryClient';
 
 const COST_KEY: Record<Hospital['costProfile'], DictKey> = {
   'very-low': 'costLabelVeryLow',
@@ -31,8 +28,12 @@ const COST_KEY: Record<Hospital['costProfile'], DictKey> = {
 
 export default function HospitalDetailClient({ hospital: h }: { hospital: Hospital }) {
   const { t, lang } = useLang();
-  const { location } = useUserLocation();
-  const [routeData, setRouteData] = useState<RouteResult | null>(null);
+  const { location, hasLocation } = useUserLocation();
+  const ds = distanceStrings(lang);
+  const ls = locationStrings(lang);
+  const [routeData, setRouteData] = useState<RouteDetailPayload | null>(null);
+  const [routeBusy, setRouteBusy] = useState(false);
+  const [altIndex, setAltIndex] = useState(0);
 
   const isGovt = h.type === 'government';
   const cover = isGovt ? '/images/hospital-govt.jpg' : '/images/hospital-private.jpg';
@@ -43,34 +44,58 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
   const opdTimings = tHospitalMeta(h.id, 'opdTimings', h.opdTimings, lang);
   const dataNote = tHospitalMeta(h.id, 'dataNote', h.dataNote, lang);
 
-  // Consistent travel metrics using shared user origin
-  const localTravel = useMemo(
-    () => estimateTravelMetrics(location.lat, location.lng, h.lat, h.lng),
-    [location.lat, location.lng, h.lat, h.lng],
-  );
+  /** Direct-line fallback is computed locally but ALWAYS labelled as such. */
+  const straightKm = useMemo(() => {
+    if (!hasLocation || typeof location.lat !== 'number' || typeof location.lng !== 'number') return null;
+    return Number(haversineKm(location.lat, location.lng, h.lat, h.lng).toFixed(1));
+  }, [hasLocation, location.lat, location.lng, h.lat, h.lng]);
 
+  /**
+   * Single authoritative route for this hospital, fetched by hospital id so the
+   * server resolves the verified destination coordinates. Supports choosing an
+   * alternative route, which then becomes the ONE route every number refers to.
+   */
   useEffect(() => {
+    if (!hasLocation || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
+      setRouteData(null);
+      return;
+    }
     let cancelled = false;
-    fetch(`/api/route?fromLat=${location.lat}&fromLng=${location.lng}&toLat=${h.lat}&toLng=${h.lng}`)
+    const controller = new AbortController();
+    setRouteBusy(true);
+    fetch(
+      `/api/route?fromLat=${location.lat}&fromLng=${location.lng}&hospitalId=${encodeURIComponent(h.id)}&alt=${altIndex}&lang=${lang}`,
+      { signal: controller.signal },
+    )
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: RouteResult | null) => {
-        if (!cancelled && d) setRouteData(d);
+      .then((d: RouteDetailPayload | null) => {
+        if (!cancelled) setRouteData(d);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setRouteData(null);
+      })
+      .finally(() => {
+        if (!cancelled) setRouteBusy(false);
+      });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [location.lat, location.lng, h.lat, h.lng]);
+  }, [hasLocation, location.lat, location.lng, h.id, altIndex, lang]);
 
-  const effectiveRoadKm = routeData?.roadKm ?? localTravel.roadKm;
-  const effectiveEtaMin = routeData?.trafficMinutes ?? localTravel.trafficMinutes;
+  const effectiveRoadKm = routeData?.distanceKm ?? null;
+  const effectiveEtaMin = routeData?.etaMinutes ?? null;
+  const trafficImpact = routeData?.trafficImpactMinutes ?? null;
+  const drivingText = formatDrivingKm(effectiveRoadKm, lang);
+  const straightText = formatStraightLineKm(straightKm, lang);
 
-  const originLabel =
-    location.source === 'default'
-      ? t('defaultLocationLabel')
-      : location.source === 'geolocation'
-        ? t('yourLocation')
-        : tPresetLabel(location.label, lang);
+  const originLabel = hasLocation
+    ? location.source === 'geolocation'
+      ? `${location.label}${location.accuracyM ? ` (±${location.accuracyM} m)` : ''}`
+      : location.source === 'unknown'
+        ? ls.notSet
+        : tPresetLabel(location.label, lang)
+    : ls.notSet;
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
@@ -142,28 +167,51 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
             </div>
           </div>
 
-          {/* Consistent Road Distance & Traffic-Aware ETA Badge */}
+          {/* Google Routes driving distance + traffic-aware ETA */}
           <div
-            className="rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 shrink-0 flex items-center gap-4"
+            className="rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 shrink-0"
             data-testid="detail-travel-summary"
           >
-            <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-brand-700">
-                {t('roadDistLabel')}
-              </p>
-              <p className="text-xl font-black text-brand-950" data-testid="detail-distance">
-                {formatDistance(effectiveRoadKm, lang)}
-              </p>
+            <div className="flex items-center gap-4">
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-brand-700">
+                  {ds.drivingDistance}
+                </p>
+                <p className="text-xl font-black text-brand-950" data-testid="detail-distance">
+                  {routeBusy ? '…' : drivingText ?? '—'}
+                </p>
+              </div>
+              <div className="h-8 w-px bg-brand-200" aria-hidden="true" />
+              <div>
+                <p className="text-[10px] font-extrabold uppercase tracking-wider text-brand-700">
+                  {ds.eta}
+                </p>
+                <p className="text-xl font-black text-brand-950 flex items-center gap-1" data-testid="detail-eta">
+                  {effectiveEtaMin !== null ? (
+                    <>
+                      <Clock size={16} className="text-brand-700" /> ~{formatDuration(effectiveEtaMin, lang)}
+                    </>
+                  ) : (
+                    <span className="text-sm font-bold text-amber-800">{ds.noLiveTraffic}</span>
+                  )}
+                </p>
+              </div>
             </div>
-            <div className="h-8 w-px bg-brand-200" aria-hidden="true" />
-            <div>
-              <p className="text-[10px] font-extrabold uppercase tracking-wider text-brand-700">
-                {t('etaLabel')}
+            {trafficImpact !== null && (
+              <p className="mt-1.5 text-[11px] font-semibold text-amber-900" data-testid="detail-traffic-impact">
+                {ds.trafficImpact}: +{trafficImpact} min
               </p>
-              <p className="text-xl font-black text-brand-950 flex items-center gap-1" data-testid="detail-eta">
-                <Clock size={16} className="text-brand-700" /> ~{formatDuration(effectiveEtaMin, lang)}
+            )}
+            {!drivingText && !routeBusy && (
+              <p className="mt-1.5 text-[11px] font-semibold text-amber-900" data-testid="detail-distance-unavailable">
+                {hasLocation ? ds.distanceUnavailableWhy : ls.notSetWhy}
               </p>
-            </div>
+            )}
+            {straightText && (
+              <p className="mt-1 text-[10px] text-slate-500">
+                {ds.straightLine}: {straightText}
+              </p>
+            )}
           </div>
         </div>
         {ownershipNote && (
@@ -199,31 +247,86 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
               <RouteIcon size={13} className="text-brand-700 shrink-0" />
               {t('distancesFromLabel')} <strong className="text-slate-700">{originLabel}</strong>
             </p>
-            <p className="mt-1 text-xs text-slate-500">{t('coordsApproxNote')}</p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              {h.geoConfidence === 'verified' ? ds.verifiedCoords : ds.approxCoords}
+            </p>
 
             <div className="mt-4">
-              <MapViewClient
-                hospitals={[{ ...h, roadKm: effectiveRoadKm, etaMinutes: effectiveEtaMin }]}
+              <MapPanel
+                hospitals={[
+                  {
+                    ...h,
+                    roadKm: effectiveRoadKm,
+                    distanceKm: effectiveRoadKm,
+                    etaMinutes: effectiveEtaMin,
+                  },
+                ]}
                 center={{ lat: h.lat, lng: h.lng }}
                 zoom={13}
-                userLocation={{ lat: location.lat, lng: location.lng }}
+                userLocation={
+                  hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
+                    ? { lat: location.lat, lng: location.lng, accuracyM: location.accuracyM }
+                    : null
+                }
                 selectedHospitalId={h.id}
                 routeGeometry={routeData?.geometry ?? null}
+                showTraffic
               />
             </div>
 
-            {routeData?.trafficDisclosure && (
-              <p className="mt-2 text-[11px] text-slate-500">{routeData.trafficDisclosure}</p>
+            <div className="mt-4">
+              <LocationControls compact />
+            </div>
+
+            {routeData?.alternatives && routeData.alternatives.length > 1 && (
+              <div className="mt-3" data-testid="alternative-routes">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{ds.alternatives}</p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {routeData.alternatives.map((alt, i) => (
+                    <button
+                      key={`${alt.distanceKm}-${i}`}
+                      type="button"
+                      onClick={() => setAltIndex(i)}
+                      aria-pressed={altIndex === i}
+                      className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold ${
+                        altIndex === i
+                          ? 'border-brand-700 bg-brand-700 text-white'
+                          : 'border-slate-200 text-slate-700 hover:border-brand-400'
+                      }`}
+                    >
+                      {alt.distanceKm.toFixed(1)} km · ~{alt.etaMinutes} min
+                      {alt.description ? ` · ${alt.description}` : ''}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-1 text-[10px] text-slate-500">{ds.sameRouteNote}</p>
+              </div>
             )}
 
-            <a
-              href={directionsFromToUrl(location.lat, location.lng, h.lat, h.lng, h.shortName)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn-secondary mt-4 w-full sm:w-auto"
-            >
-              <Navigation size={18} /> {t('openDirectionsGmaps')}
-            </a>
+            {routeData?.disclosure.text && (
+              <p className="mt-2 text-[11px] text-slate-500">
+                {routeData.disclosure.text}
+                {routeData.computedAt && (
+                  <> · {ds.lastUpdated} {new Date(routeData.computedAt).toLocaleTimeString()}</>
+                )}
+              </p>
+            )}
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <a
+                href={
+                  routeData?.navigateUrl ??
+                  (hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
+                    ? directionsFromToUrl(location.lat, location.lng, h.lat, h.lng, h.shortName)
+                    : `https://www.google.com/maps/dir/?api=1&destination=${h.lat},${h.lng}&travelmode=driving`)
+                }
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-secondary w-full sm:w-auto"
+              >
+                <Navigation size={18} /> {ds.navigateGmaps}
+              </a>
+            </div>
           </section>
 
           {/* IMDb-style Community Score + Google Ratings + Moderated Reviews */}

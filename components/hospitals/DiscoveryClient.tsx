@@ -6,17 +6,38 @@ import {
   AlertCircle, Building2, Landmark, Siren, X, MapPin, GitCompareArrows, Info,
   Bookmark, Clock, Navigation, Route as RouteIcon,
 } from 'lucide-react';
-import { useUserLocation, CITY_PRESETS } from '@/lib/useLocation';
+import { useUserLocation } from '@/lib/useLocation';
 import { ALL_SPECIALITIES } from '@/data/hospitals';
 import HospitalCard, { EnrichedHospital } from '@/components/HospitalCard';
-import MapViewClient from '@/components/MapViewClient';
+import MapPanel from '@/components/maps/MapPanel';
+import LocationControls from '@/components/LocationControls';
 import VoiceSearchButton from '@/components/VoiceSearchButton';
 import { useLang } from '@/lib/i18n';
-import { tCity, tPresetLabel, tSpeciality } from '@/lib/i18n-data';
+import { tSpeciality } from '@/lib/i18n-data';
 import { useCompare } from '@/lib/compare';
 import { useSavedHospitals } from '@/lib/saved';
-import { formatDistance, formatDuration, directionsUrl } from '@/lib/geo';
-import type { RouteResult } from '@/lib/routing';
+import { formatDrivingKm, formatDuration, directionsUrl } from '@/lib/geo';
+import { distanceStrings, locationStrings } from '@/lib/ui-strings';
+
+/** Shape returned by /api/route (Google Routes derived). */
+export interface RouteDetailPayload {
+  hospitalId: string;
+  distanceKm: number | null;
+  distanceMeters: number | null;
+  etaMinutes: number | null;
+  staticMinutes: number | null;
+  trafficImpactMinutes: number | null;
+  straightKm: number | null;
+  source: 'google-routes-api' | 'google-route-matrix' | 'unavailable';
+  computedAt: string | null;
+  error: string | null;
+  disclosure: { text: string; live: boolean };
+  geometry: [number, number][];
+  alternatives: { distanceKm: number; etaMinutes: number; description: string | null; labels: string[] }[];
+  selectedIndex: number;
+  polylineSource: string;
+  navigateUrl: string | null;
+}
 
 interface DiscoveryProps {
   initialQ?: string;
@@ -40,7 +61,7 @@ export default function DiscoveryClient({
   const { t, lang } = useLang();
   const { ids: compareIds } = useCompare();
   const { savedIds } = useSavedHospitals();
-  const { location, setManual, requestGeolocation, status, errorCode } = useUserLocation();
+  const { location, requestGeolocation, status, errorCode, hasLocation } = useUserLocation();
 
   const [q, setQ] = useState(initialQ);
   const [type, setType] = useState<'all' | 'government' | 'private'>(initialType);
@@ -51,11 +72,6 @@ export default function DiscoveryClient({
   const [sort, setSort] = useState<'distance' | 'rating' | 'name' | 'type'>('distance');
   const [showEmptyNotice, setShowEmptyNotice] = useState(initialEmpty && !initialQ && !initialSpeciality);
 
-  const [manualInput, setManualInput] = useState('');
-  const [manualResults, setManualResults] = useState<{ label: string; lat: number; lng: number; source?: string }[] | null>(null);
-  const [manualBusy, setManualBusy] = useState(false);
-  const [manualErrorKey, setManualErrorKey] = useState<'manualMinCharsError' | 'manualNoMatchError' | 'manualOfflineError' | null>(null);
-
   const [results, setResults] = useState<EnrichedHospital[] | null>(null);
   const [fellBack, setFellBack] = useState(false);
   const [listError, setListError] = useState(false);
@@ -63,15 +79,33 @@ export default function DiscoveryClient({
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(null);
-  const [activeRoute, setActiveRoute] = useState<RouteResult | null>(null);
+  const [activeRoute, setActiveRoute] = useState<RouteDetailPayload | null>(null);
   const [routeBusy, setRouteBusy] = useState(false);
+  const [showTraffic, setShowTraffic] = useState(true);
+  const [distanceMeta, setDistanceMeta] = useState<{
+    source: string;
+    disclosure: { text: string; live: boolean };
+    blockers: string[];
+    computedAt: string;
+  } | null>(null);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchHospitals = useCallback(() => {
+    /**
+     * No origin → no request. The previous version silently sent Delhi's
+     * coordinates, which is how different pages ended up showing different
+     * distances for the same hospital.
+     */
+    if (!hasLocation) {
+      setResults(null);
+      setDistanceMeta(null);
+      return;
+    }
     const params = new URLSearchParams({
       lat: String(location.lat),
       lng: String(location.lng),
+      source: location.source,
       radius: String(savedOnly ? 1000 : radius),
       type,
       sort,
@@ -86,9 +120,15 @@ export default function DiscoveryClient({
       .then((data) => {
         setResults(data.results ?? []);
         setFellBack(Boolean(data.fellBack));
+        setDistanceMeta({
+          source: data.distanceSource ?? 'unavailable',
+          disclosure: data.distanceDisclosure ?? { text: '', live: false },
+          blockers: data.blockers ?? [],
+          computedAt: data.travelComputedAt ?? '',
+        });
       })
       .catch(() => setListError(true));
-  }, [location.lat, location.lng, radius, savedOnly, type, speciality, emergencyOnly, q, sort, lang]);
+  }, [hasLocation, location.lat, location.lng, location.source, radius, savedOnly, type, speciality, emergencyOnly, q, sort, lang]);
 
   // Debounced refetch on control change (preserves origin, selectedHospitalId, and filters across language switch!)
   useEffect(() => {
@@ -110,20 +150,32 @@ export default function DiscoveryClient({
     [displayedResults, selectedHospitalId],
   );
 
-  // Fetch route preview whenever a hospital is selected or origin changes
+  /**
+   * Route preview for the selected hospital.
+   *
+   * Requested by stable hospital id so the SERVER resolves the destination from
+   * the verified coordinate registry — the client can never pass a stale or
+   * wrong coordinate into a distance calculation. The `cancelled` flag discards
+   * out-of-order responses so an older route can never overwrite a newer one.
+   */
   useEffect(() => {
-    if (!selectedHospital) {
+    if (!selectedHospital || !hasLocation || !Number.isFinite(location.lat)) {
       setActiveRoute(null);
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     setRouteBusy(true);
+    setActiveRoute(null);
     fetch(
-      `/api/route?fromLat=${location.lat}&fromLng=${location.lng}&toLat=${selectedHospital.lat}&toLng=${selectedHospital.lng}`,
+      `/api/route?fromLat=${location.lat}&fromLng=${location.lng}&hospitalId=${encodeURIComponent(
+        selectedHospital.id,
+      )}&lang=${lang}`,
+      { signal: controller.signal },
     )
       .then((r) => (r.ok ? r.json() : null))
-      .then((data: RouteResult | null) => {
-        if (!cancelled && data) setActiveRoute(data);
+      .then((data: RouteDetailPayload | null) => {
+        if (!cancelled) setActiveRoute(data);
       })
       .catch(() => {
         if (!cancelled) setActiveRoute(null);
@@ -133,8 +185,9 @@ export default function DiscoveryClient({
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [selectedHospital, location.lat, location.lng]);
+  }, [selectedHospital, hasLocation, location.lat, location.lng, lang]);
 
   const handleSelectHospital = useCallback((hospitalId: string) => {
     setSelectedHospitalId(hospitalId);
@@ -145,37 +198,6 @@ export default function DiscoveryClient({
       }
     }
   }, []);
-
-  const runManualGeocode = useCallback(async () => {
-    const query = manualInput.trim();
-    setManualErrorKey(null);
-    if (query.length < 2) {
-      setManualErrorKey('manualMinCharsError');
-      return;
-    }
-    setManualBusy(true);
-    setManualResults(null);
-    try {
-      const res = await fetch(`/api/geocode?q=${encodeURIComponent(query)}&lang=${encodeURIComponent(lang)}`);
-      if (!res.ok) throw new Error('geocode failed');
-      const data: { results?: { label: string; lat: number; lng: number; source?: string }[] } = await res.json();
-      const items = data.results ?? [];
-      if (items.length === 0) {
-        setManualErrorKey('manualNoMatchError');
-      } else if (items.length === 1) {
-        // Direct match — apply immediately for frictionless UX
-        setManual(items[0].lat, items[0].lng, items[0].label, 'manual');
-        setManualResults(null);
-        setManualInput('');
-      } else {
-        setManualResults(items);
-      }
-    } catch {
-      setManualErrorKey('manualOfflineError');
-    } finally {
-      setManualBusy(false);
-    }
-  }, [manualInput, lang, setManual]);
 
   const clearFilters = () => {
     setQ('');
@@ -200,19 +222,14 @@ export default function DiscoveryClient({
     [displayedResults],
   );
 
-  const displayLocationLabel =
-    location.source === 'default'
-      ? t('defaultLocationLabel')
-      : location.source === 'geolocation'
-        ? t('yourLocation')
-        : tPresetLabel(location.label, lang);
-
+  const ls = locationStrings(lang);
+  const ds = distanceStrings(lang);
   const geoErrorText =
     errorCode === 'unavailable'
       ? t('geoUnavailableError')
       : errorCode === 'denied'
-        ? t('geoDeniedError')
-        : errorCode === 'failed'
+        ? ls.denied
+        : errorCode === 'position-unavailable' || errorCode === 'timeout'
           ? t('geoFailedError')
           : null;
 
@@ -251,42 +268,12 @@ export default function DiscoveryClient({
         </div>
       </div>
 
-      {/* Location status */}
-      <p className="mt-2.5 text-xs text-slate-600 flex items-center gap-1.5" data-testid="active-origin-banner">
-        <MapPin size={14} className="shrink-0 text-brand-700" /> {t('showingResultsAround')}{' '}
-        <strong className="text-slate-900">{displayLocationLabel}</strong>
-      </p>
-      {geoErrorText && (
-        <p role="alert" className="mt-1.5 flex items-center gap-1.5 text-xs text-red-700">
-          <AlertCircle size={14} className="shrink-0" />
-          {geoErrorText}
-        </p>
-      )}
-
-      {/* Empty search notice */}
-      {showEmptyNotice && (
-        <div
-          role="status"
-          className="mt-4 flex items-start justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
-        >
-          <p className="flex items-start gap-2">
-            <Info size={17} className="mt-0.5 shrink-0 text-amber-700" />
-            <span>{t('emptySearchBanner')}</span>
-          </p>
-          <button
-            type="button"
-            onClick={() => setShowEmptyNotice(false)}
-            aria-label={t('clearFilters')}
-            className="text-amber-800 hover:text-amber-950 p-1"
-          >
-            <X size={16} />
-          </button>
+      {/* ── Central location control (requirement 3) ── */}
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <div className="lg:col-span-1">
+          <LocationControls onOriginChange={() => setSelectedHospitalId(null)} />
         </div>
-      )}
-
-      {/* Search + manual location */}
-      <div className="card mt-4 p-4 sm:p-5 grid gap-4 lg:grid-cols-2">
-        <div>
+        <div className="card p-4 lg:col-span-2">
           <label htmlFor="hosp-search" className="label">
             {t('searchHospitalLabel')}
           </label>
@@ -312,93 +299,52 @@ export default function DiscoveryClient({
               />
             </div>
           </div>
-        </div>
-
-        <div>
-          <label htmlFor="manual-loc" className="label">
-            {t('manualLocationLabel')}
-          </label>
-          <div className="flex gap-2">
-            <div className="relative flex-1 flex items-center">
-              <input
-                id="manual-loc"
-                value={manualInput}
-                onChange={(e) => {
-                  setManualInput(e.target.value);
-                  setManualResults(null);
-                  setManualErrorKey(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    runManualGeocode();
-                  }
-                }}
-                placeholder={t('manualLocationPlaceholder')}
-                className="input !pr-11"
-                aria-describedby="manual-hint"
-              />
-              <div className="absolute right-1.5">
-                <VoiceSearchButton onTranscript={(txt) => setManualInput(txt)} />
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={runManualGeocode}
-              disabled={manualBusy}
-              className="btn-secondary !px-4"
-              aria-label={t('searchLocationAria')}
-              data-testid="geocode-submit-btn"
-            >
-              {manualBusy ? <Loader2 size={20} className="animate-spin" /> : <Search size={20} />}
-            </button>
-          </div>
-          <p id="manual-hint" className="sr-only">
-            {t('manualHintSr')}
-          </p>
-          {manualErrorKey && (
-            <p role="alert" className="mt-1.5 text-xs text-red-700">
-              {t(manualErrorKey)}
+          {geoErrorText && (
+            <p role="alert" className="mt-2 flex items-center gap-1.5 text-xs text-red-700">
+              <AlertCircle size={14} className="shrink-0" />
+              {geoErrorText}
             </p>
           )}
-          {manualResults && (
-            <ul
-              className="mt-1.5 rounded-xl border border-slate-200 bg-white shadow-lg divide-y divide-slate-100 overflow-hidden"
-              data-testid="geocode-results-list"
-            >
-              {manualResults.map((r) => (
-                <li key={`${r.lat}-${r.lng}-${r.label}`}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setManual(r.lat, r.lng, r.label, 'manual');
-                      setManualResults(null);
-                      setManualInput('');
-                    }}
-                    className="w-full text-left px-4 py-2.5 text-sm hover:bg-brand-50 focus:bg-brand-50 flex items-center justify-between gap-2"
-                  >
-                    <span>{r.label}</span>
-                    <MapPin size={14} className="text-brand-700 shrink-0" />
-                  </button>
-                </li>
-              ))}
-            </ul>
+          {!hasLocation && (
+            <p role="status" className="mt-2 flex items-start gap-1.5 text-xs text-amber-800">
+              <Info size={14} className="mt-0.5 shrink-0" />
+              {ls.notSetWhy}
+            </p>
           )}
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            <span className="text-[11px] text-slate-500 py-1">{t('quickPicks')}</span>
-            {CITY_PRESETS.slice(0, 9).map((c) => (
-              <button
-                key={c.label}
-                type="button"
-                onClick={() => setManual(c.lat, c.lng, `${c.label}, ${c.state}`, 'preset')}
-                className="text-[11px] font-semibold rounded-full border border-slate-200 px-2.5 py-1 text-slate-600 hover:border-brand-500 hover:text-brand-800"
-              >
-                {tCity(c.label, lang)}
-              </button>
-            ))}
-          </div>
+          {distanceMeta && (
+            <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-snug text-slate-500" data-testid="distance-disclosure">
+              <RouteIcon size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>
+                {distanceMeta.disclosure.text}
+                {distanceMeta.blockers.length > 0 && (
+                  <span className="mt-0.5 block font-semibold text-amber-800">{distanceMeta.blockers[0]}</span>
+                )}
+              </span>
+            </p>
+          )}
         </div>
       </div>
+
+      {/* Empty search notice */}
+      {showEmptyNotice && (
+        <div
+          role="status"
+          className="mt-4 flex items-start justify-between gap-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+        >
+          <p className="flex items-start gap-2">
+            <Info size={17} className="mt-0.5 shrink-0 text-amber-700" />
+            <span>{t('emptySearchBanner')}</span>
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowEmptyNotice(false)}
+            aria-label={t('clearFilters')}
+            className="text-amber-800 hover:text-amber-950 p-1"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Filters bar */}
       <div className="mt-3 card p-3 sm:p-4">
@@ -588,17 +534,45 @@ export default function DiscoveryClient({
       {/* Results: map + route preview + list */}
       <div className="mt-3 grid lg:grid-cols-5 gap-4 items-start">
         <div className={`${mobileView === 'map' ? 'block' : 'hidden'} lg:block lg:col-span-2 lg:sticky lg:top-24`}>
-          <MapViewClient
+          <MapPanel
             hospitals={displayedResults ?? []}
-            center={{ lat: location.lat, lng: location.lng }}
-            userLocation={{ lat: location.lat, lng: location.lng }}
+            center={
+              selectedHospital
+                ? { lat: selectedHospital.lat, lng: selectedHospital.lng }
+                : hasLocation
+                  ? { lat: location.lat as number, lng: location.lng as number }
+                  : { lat: 20.5937, lng: 78.9629 }
+            }
+            zoom={selectedHospital ? 13 : 11}
+            userLocation={
+              hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
+                ? { lat: location.lat, lng: location.lng, accuracyM: location.accuracyM }
+                : null
+            }
             selectedHospitalId={selectedHospitalId}
             onSelectHospital={(id) => handleSelectHospital(id)}
             routeGeometry={activeRoute?.geometry ?? null}
+            showTraffic={showTraffic}
           />
-          <p className="mt-1.5 text-[11px] text-slate-500 text-center">{t('mapAttributionNote')}</p>
 
-          {/* Active Route & Traffic-Aware ETA Card */}
+          <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
+              <input
+                type="checkbox"
+                checked={showTraffic}
+                onChange={(e) => setShowTraffic(e.target.checked)}
+                className="h-4 w-4 accent-brand-700"
+              />
+              Live traffic layer
+            </label>
+            <span className="text-[10px] text-slate-400">
+              {distanceMeta?.computedAt
+                ? `${ds.lastUpdated}: ${new Date(distanceMeta.computedAt).toLocaleTimeString()}`
+                : ds.sourceGoogle}
+            </span>
+          </div>
+
+          {/* Selected route: Google-derived distance, ETA, traffic impact */}
           {selectedHospital && (
             <div
               className="mt-3 card p-4 border-2 border-brand-500 bg-brand-50/40"
@@ -607,9 +581,12 @@ export default function DiscoveryClient({
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="text-[11px] font-extrabold uppercase tracking-wider text-brand-700 flex items-center gap-1">
-                    <RouteIcon size={13} /> {t('etaLabel')}
+                    <RouteIcon size={13} /> {ds.drivingDistance}
                   </p>
                   <h2 className="font-extrabold text-sm text-slate-900 mt-0.5">{selectedHospital.name}</h2>
+                  <p className="mt-0.5 text-[10px] text-slate-500">
+                    {selectedHospital.geoConfidence === 'verified' ? ds.verifiedCoords : ds.approxCoords}
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -626,41 +603,72 @@ export default function DiscoveryClient({
 
               <div className="mt-2.5 grid grid-cols-2 gap-2 text-center">
                 <div className="rounded-xl bg-white border border-brand-100 p-2.5">
-                  <p className="text-[10px] uppercase font-bold text-slate-500">{t('roadDistLabel')}</p>
+                  <p className="text-[10px] uppercase font-bold text-slate-500">{ds.drivingDistance}</p>
                   <p className="text-base font-black text-brand-900" data-testid="route-panel-distance">
-                    {formatDistance(activeRoute?.roadKm ?? selectedHospital.roadKm ?? selectedHospital.distanceKm, lang)}
+                    {routeBusy
+                      ? '…'
+                      : formatDrivingKm(activeRoute?.distanceKm ?? selectedHospital.roadKm ?? null, lang) ?? '—'}
                   </p>
                 </div>
                 <div className="rounded-xl bg-white border border-brand-100 p-2.5">
-                  <p className="text-[10px] uppercase font-bold text-slate-500">{t('etaLabel')}</p>
+                  <p className="text-[10px] uppercase font-bold text-slate-500">{ds.eta}</p>
                   <p className="text-base font-black text-brand-900 flex items-center justify-center gap-1" data-testid="route-panel-eta">
                     {routeBusy ? (
                       <Loader2 size={14} className="animate-spin" />
-                    ) : (
+                    ) : activeRoute?.etaMinutes || selectedHospital.etaMinutes ? (
                       <>
                         <Clock size={14} className="text-brand-700" /> ~
-                        {formatDuration(activeRoute?.trafficMinutes ?? selectedHospital.etaMinutes, lang)}
+                        {formatDuration(activeRoute?.etaMinutes ?? selectedHospital.etaMinutes, lang)}
                       </>
+                    ) : (
+                      <span className="text-xs font-bold text-amber-800">{ds.noLiveTraffic}</span>
                     )}
                   </p>
                 </div>
               </div>
 
-              {activeRoute?.trafficDisclosure && (
-                <p className="mt-2 text-[10px] text-slate-500 leading-snug">{activeRoute.trafficDisclosure}</p>
+              {typeof (activeRoute?.trafficImpactMinutes ?? selectedHospital.trafficImpactMinutes) === 'number' && (
+                <p className="mt-2 text-[11px] font-semibold text-amber-900">
+                  {ds.trafficImpact}: +{activeRoute?.trafficImpactMinutes ?? selectedHospital.trafficImpactMinutes} min
+                </p>
               )}
 
-              <div className="mt-3 flex gap-2">
+              {activeRoute?.alternatives && activeRoute.alternatives.length > 1 && (
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {ds.alternatives}: {activeRoute.alternatives.length - 1} ·{' '}
+                  {ds.sameRouteNote}
+                </p>
+              )}
+
+              {(activeRoute?.disclosure.text || distanceMeta?.disclosure.text) && (
+                <p className="mt-2 text-[10px] text-slate-500 leading-snug">
+                  {activeRoute?.disclosure.text || distanceMeta?.disclosure.text}
+                </p>
+              )}
+              {activeRoute?.error && (
+                <p className="mt-1 text-[10px] font-semibold text-amber-800" data-testid="route-error">
+                  {activeRoute.error} — {ds.distanceUnavailableWhy}
+                </p>
+              )}
+
+              <div className="mt-2 flex flex-wrap gap-2">
                 <a
-                  href={directionsUrl(selectedHospital.lat, selectedHospital.lng, selectedHospital.shortName, {
-                    lat: location.lat,
-                    lng: location.lng,
-                  })}
+                  href={
+                    activeRoute?.navigateUrl ??
+                    directionsUrl(
+                      selectedHospital.lat,
+                      selectedHospital.lng,
+                      selectedHospital.shortName,
+                      hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
+                        ? { lat: location.lat, lng: location.lng }
+                        : null,
+                    )
+                  }
                   target="_blank"
                   rel="noopener noreferrer"
                   className="btn-primary !py-2 !px-3 !text-xs !min-h-[38px] flex-1"
                 >
-                  <Navigation size={14} /> {t('getDirections')}
+                  <Navigation size={14} /> {ds.navigateGmaps}
                 </a>
                 <Link
                   href={`/hospitals/${selectedHospital.id}`}
@@ -681,6 +689,17 @@ export default function DiscoveryClient({
               <button type="button" onClick={fetchHospitals} className="btn-primary mt-4">
                 {t('retryBtn')}
               </button>
+            </div>
+          ) : !hasLocation ? (
+            <div className="card p-6 text-center" role="status" data-testid="origin-required">
+              <MapPin className="mx-auto text-brand-400" size={34} />
+              <h2 className="mt-2 font-bold text-lg text-slate-800">{ls.notSet}</h2>
+              <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">{ls.notSetWhy}</p>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <button type="button" onClick={requestGeolocation} className="btn-primary !py-2.5 !text-sm">
+                  <LocateFixed size={16} /> {ls.usePrecise}
+                </button>
+              </div>
             </div>
           ) : displayedResults === null ? (
             [0, 1, 2].map((i) => (

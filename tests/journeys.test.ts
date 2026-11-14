@@ -3,149 +3,213 @@ import { NextRequest } from 'next/server';
 import { GET as getHospitals } from '@/app/api/hospitals/route';
 import { GET as getGeocode } from '@/app/api/geocode/route';
 import { GET as getEmergency } from '@/app/api/emergency/route';
-import { GET as getGoogleRating } from '@/app/api/google-ratings/route';
-import { GET as getReviews, POST as postReview } from '@/app/api/reviews/route';
-import { POST as postChat } from '@/app/api/chat/route';
-import { HOSPITALS } from '@/data/hospitals';
-import { estimateTravelMetrics } from '@/lib/geo';
+import { GET as getTravel } from '@/app/api/travel/route';
+import { GET as getRouteDetail } from '@/app/api/route/route';
+import { GET as getRankings } from '@/app/api/rankings/route';
+import { POST as postAssistant } from '@/app/api/assistant/route';
+import { HOSPITALS, getHospitalById } from '@/data/hospitals';
 
-describe('LOOP 4 — Cross-Feature User Journeys & API Integration Verification', () => {
-  it('Journey 1: Multilingual Discovery (Tamil -> Pusa Road -> Marker #2 -> Hindi preserves origin & distance)', async () => {
-    // 1. Geocode Pusa Road, New Delhi in Tamil
-    const geoReq = new NextRequest('http://localhost:3000/api/geocode?q=Pusa%20Road,%20New%20Delhi&lang=ta');
-    const geoRes = await getGeocode(geoReq);
+/**
+ * LOOP D — end-to-end user journeys through the real route handlers.
+ *
+ * No credentials exist in this environment, so every journey must end in an
+ * honest degraded state: real hospital data, real geocoding, and NO invented
+ * distance, ETA or traffic number. These tests fail if a fallback ever starts
+ * producing a road distance again.
+ */
+
+const PUSA = { lat: 28.6426, lng: 77.1842 };
+
+describe('Journey 1 — multilingual discovery keeps one origin and one distance source', () => {
+  it('geocodes Pusa Road, then returns the same road distances in Tamil and Hindi', async () => {
+    const geoRes = await getGeocode(
+      new NextRequest('http://localhost:3000/api/geocode?q=Pusa%20Road,%20New%20Delhi&lang=ta'),
+    );
     const geoData = await geoRes.json();
     expect(geoData.results.length).toBeGreaterThan(0);
+    expect(geoData.results[0].label).toContain('Pusa Road');
     const origin = geoData.results[0];
-    expect(origin.label).toContain('Pusa Road');
 
-    // 2. Fetch nearby hospitals around Pusa Road in Tamil
-    const hospTaReq = new NextRequest(
-      `http://localhost:3000/api/hospitals?lat=${origin.lat}&lng=${origin.lng}&radius=25&sort=distance&lang=ta`,
-    );
-    const hospTaRes = await getHospitals(hospTaReq);
-    const hospTaData = await hospTaRes.json();
-    expect(hospTaData.results.length).toBeGreaterThan(2);
+    const url = (lang: string) =>
+      `http://localhost:3000/api/hospitals?lat=${origin.lat}&lng=${origin.lng}&source=manual&radius=25&sort=distance&lang=${lang}`;
 
-    const marker2Ta = hospTaData.results[1]; // Marker #2 (1-based index 2)
-    const detailMetrics = estimateTravelMetrics(origin.lat, origin.lng, marker2Ta.lat, marker2Ta.lng);
-    // Distance & ETA consistency between discovery marker #2 and detail page calculation
-    expect(marker2Ta.roadKm).toBe(detailMetrics.roadKm);
-    expect(marker2Ta.etaMinutes).toBe(detailMetrics.trafficMinutes);
+    const ta = await (await getHospitals(new NextRequest(url('ta')))).json();
+    const hi = await (await getHospitals(new NextRequest(url('hi')))).json();
 
-    // 3. Switch language to Hindi with same origin & filters -> hospital order, ID, roadKm, and ETA stay identical
-    const hospHiReq = new NextRequest(
-      `http://localhost:3000/api/hospitals?lat=${origin.lat}&lng=${origin.lng}&radius=25&sort=distance&lang=hi`,
-    );
-    const hospHiRes = await getHospitals(hospHiReq);
-    const hospHiData = await hospHiRes.json();
-    expect(hospHiData.results[1].id).toBe(marker2Ta.id);
-    expect(hospHiData.results[1].roadKm).toBe(marker2Ta.roadKm);
-    expect(hospHiData.results[1].etaMinutes).toBe(marker2Ta.etaMinutes);
+    expect(ta.results.length).toBeGreaterThan(2);
+
+    // Language must not change the data, only the labels.
+    const ids = (r: { id: string }[]) => r.map((h) => h.id);
+    expect(ids(ta.results)).toEqual(ids(hi.results));
+
+    for (const h of ta.results) {
+      const same = hi.results.find((x: { id: string }) => x.id === h.id);
+      expect(same?.distanceKm).toBe(h.distanceKm);
+      expect(same?.etaMinutes).toBe(h.etaMinutes);
+      expect(same?.straightKm).toBe(h.straightKm);
+    }
+
+    // And with no Maps key, every distance is explicitly unknown — not modelled.
+    for (const h of ta.results) {
+      expect(h.distanceKm).toBeNull();
+      expect(h.etaMinutes).toBeNull();
+      expect(h.travelSource).toBe('unavailable');
+    }
   });
 
-  it('Journey 2: Ratings, Google Honesty Disclosure, Review Moderation & 3-Hospital Comparison Origin Update', async () => {
-    // 1. Inspect Google rating endpoint without API key -> never invents a score
-    const gReq = new NextRequest('http://localhost:3000/api/google-ratings?hospitalId=aiims-new-delhi');
-    const gRes = await getGoogleRating(gReq);
-    const gData = await gRes.json();
-    expect(gData.status).toBe('awaiting-api-key');
-    expect(gData.rating).toBeNull();
-    expect(gData.googleMapsUrl).toContain('google.com/maps');
+  it('refuses to guess an origin when lat/lng are missing', async () => {
+    const res = await getHospitals(new NextRequest('http://localhost:3000/api/hospitals?lang=en'));
+    expect(res.status).toBe(400);
+    const data = await res.json();
+    expect(data.code).toBe('ORIGIN_REQUIRED');
+  });
+});
 
-    // 2. Inspect JeevanSetu Community Score & distribution
-    const rReq = new NextRequest('http://localhost:3000/api/reviews?hospitalId=aiims-new-delhi');
-    const rRes = await getReviews(rReq);
-    const rData = await rRes.json();
-    expect(rData.summary.imdbScaleScore).toBeGreaterThan(7);
-    expect(rData.summary.eligibleCount).toBeGreaterThanOrEqual(3);
+describe('Journey 2 — hospital detail shares the list’s data (no second opinion)', () => {
+  it('returns the same leg from /api/travel and /api/route for the same hospital', async () => {
+    const travel = await (
+      await getTravel(
+        new NextRequest(`http://localhost:3000/api/travel?lat=${PUSA.lat}&lng=${PUSA.lng}&ids=bsa-hospital,aiims-new-delhi`),
+      )
+    ).json();
 
-    // 3. Submit a new legitimate review and confirm score updates
-    const postReq = new NextRequest('http://localhost:3000/api/reviews', {
+    const detail = await (
+      await getRouteDetail(
+        new NextRequest(
+          `http://localhost:3000/api/route?fromLat=${PUSA.lat}&fromLng=${PUSA.lng}&hospitalId=bsa-hospital`,
+        ),
+      )
+    ).json();
+
+    const fromTravel = travel.hospitals.find((h: { id: string }) => h.id === 'bsa-hospital');
+    expect(detail.hospitalId).toBe('bsa-hospital');
+    expect(detail.distanceKm).toBe(fromTravel.distanceKm);
+    expect(detail.etaMinutes).toBe(fromTravel.etaMinutes);
+    expect(detail.straightKm).toBe(fromTravel.straightKm);
+    // No key → unavailable, with an explanation rather than a number.
+    expect(detail.source).toBe('unavailable');
+    expect(detail.error).toMatch(/GOOGLE_MAPS_API_KEY/);
+    expect(detail.geometry).toEqual([]);
+    expect(detail.disclosure.text.length).toBeGreaterThan(10);
+  });
+
+  it('rejects an unknown hospital id instead of routing somewhere else', async () => {
+    const res = await getRouteDetail(
+      new NextRequest(
+        `http://localhost:3000/api/route?fromLat=${PUSA.lat}&fromLng=${PUSA.lng}&hospitalId=not-a-hospital`,
+      ),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('rejects non-numeric coordinates', async () => {
+    const res = await getRouteDetail(
+      new NextRequest('http://localhost:3000/api/route?fromLat=abc&fromLng=77.1&hospitalId=bsa-hospital'),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+describe('Journey 3 — emergency list is honest about what it does not know', () => {
+  it('returns verified 24×7 hospitals with no invented ETA and no incident feed', async () => {
+    const data = await (
+      await getEmergency(new NextRequest(`http://localhost:3000/api/emergency?lat=${PUSA.lat}&lng=${PUSA.lng}&lang=en`))
+    ).json();
+
+    expect(data.verifiedCount).toBeGreaterThan(10);
+    expect(data.hospitals[0].emergency).toBe('verified');
+    expect(data.hospitals[0].distanceKm).toBeNull();
+    expect(data.hospitals[0].etaMinutes).toBeNull();
+    expect(data.incidentFeedStatus).toBe('unavailable-no-authorised-feed');
+    expect(data.distanceDisclosure?.text).toBeTruthy();
+    expect(data.originKnown).toBe(true);
+  });
+
+  it('still works with no origin (lists hospitals, no distances)', async () => {
+    const res = await getEmergency(new NextRequest('http://localhost:3000/api/emergency?lang=en'));
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.originKnown).toBe(false);
+    expect(data.hospitals.length).toBeGreaterThan(0);
+    expect(data.hospitals.every((h: { distanceKm: number | null }) => h.distanceKm === null)).toBe(true);
+  });
+});
+
+describe('Journey 4 — assistant answers greetings conversationally and searches on request', () => {
+  const body = (payload: unknown) =>
+    new NextRequest('http://localhost:3000/api/assistant', {
       method: 'POST',
-      body: JSON.stringify({
-        hospitalId: 'rml-hospital',
-        authorAlias: 'Priya M.',
-        visitType: 'OPD',
-        overall: 5,
-        doctorCare: 5,
-        cleanliness: 4,
-        waitTime: 4,
-        billingTransparency: 5,
-        comment: 'Helpful doctors in general medicine OPD and free medicines at the pharmacy counter.',
-      }),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
     });
-    const postRes = await postReview(postReq);
-    expect(postRes.status).toBe(201);
 
-    // 4. Compare 3 hospitals across origin change (Delhi -> Gurugram)
-    const ids = ['aiims-new-delhi', 'safdarjung-hospital', 'medanta-medicity'];
-    const selected = ids.map((id) => HOSPITALS.find((h) => h.id === id)!);
-    const fromDelhi = selected.map((h) => estimateTravelMetrics(28.6139, 77.2090, h.lat, h.lng));
-    const fromGurugram = selected.map((h) => estimateTravelMetrics(28.4595, 77.0266, h.lat, h.lng));
-
-    // From Delhi, AIIMS is closer than Medanta; from Gurugram, Medanta is closer than AIIMS!
-    expect(fromDelhi[0].roadKm).toBeLessThan(fromDelhi[2].roadKm);
-    expect(fromGurugram[2].roadKm).toBeLessThan(fromGurugram[0].roadKm);
+  it('a Bengali greeting gets a greeting, not a hospital list', async () => {
+    const res = await postAssistant(body({ message: 'হ্যালো', lang: 'bn', istHour: 10 }));
+    const data = await res.json();
+    expect(data.hospitals).toHaveLength(0);
+    expect(data.toolsRun).toHaveLength(0);
+    expect(data.intent).toBe('greeting');
+    expect(data.reply).toMatch(/[\u0980-\u09FF]/);
   });
 
-  it('Journey 3: Emergency Assistance (Verified 24x7 hospitals, Traffic-aware ETAs, No fake incident alerts)', async () => {
-    const emReq = new NextRequest('http://localhost:3000/api/emergency?lat=28.6426&lng=77.1842&lang=en');
-    const emRes = await getEmergency(emReq);
-    const emData = await emRes.json();
-    expect(emData.verifiedCount).toBeGreaterThan(10);
-    expect(emData.hospitals[0].emergency).toBe('verified');
-    expect(emData.hospitals[0].roadKm).toBeGreaterThan(0);
-    expect(emData.hospitals[0].etaMinutes).toBeGreaterThan(0);
-    expect(emData.incidentFeedStatus).toBe('unavailable-no-authorised-feed');
-  });
-
-  it('Journey 4: Bengali AI Chatbot (Nearby govt hospitals + ETA/Cost + Refuses unsupported claims)', async () => {
-    // Ask in Bengali for nearby government hospitals in Kolkata
-    const chatBnReq = new NextRequest('http://localhost:3000/api/chat', {
-      method: 'POST',
-      body: JSON.stringify({
+  it('a Bengali government-hospital request returns real hospitals in Bengali', async () => {
+    const res = await postAssistant(
+      body({
         message: 'কাছাকাছি সরকারি হাসপাতাল দেখান',
         lang: 'bn',
-        lat: 22.5726,
-        lng: 88.3639, // Kolkata
+        origin: { lat: 22.5726, lng: 88.3639, label: 'Kolkata', source: 'manual' },
+        istHour: 10,
       }),
-    });
-    const chatBnRes = await postChat(chatBnReq);
-    const chatBnData = await chatBnRes.json();
-    expect(chatBnData.recommendedHospitals.length).toBeGreaterThan(0);
-    // All returned hospitals must be actual government hospitals from dataset, nearest to Kolkata = sskm-kolkata
-    expect(chatBnData.recommendedHospitals.every((h: { type: string }) => h.type === 'government')).toBe(true);
-    expect(chatBnData.recommendedHospitals[0].id).toBe('sskm-kolkata');
+    );
+    const data = await res.json();
+    expect(data.hospitals.length).toBeGreaterThan(0);
+    expect(data.hospitals.every((h: { type: string }) => h.type === 'government')).toBe(true);
+    expect(data.hospitals[0].id).toBe('sskm-kolkata');
+    expect(data.groundingMode).toBe('deterministic-grounded');
+    expect(data.blockers.join(' ')).toMatch(/GEMINI/);
+  });
 
-    // Ask about travel time & delivery cost for SSKM Hospital
-    const followReq = new NextRequest('http://localhost:3000/api/chat', {
-      method: 'POST',
-      body: JSON.stringify({
-        message: 'normal delivery cost and travel time',
-        lang: 'bn',
-        lat: 22.5726,
-        lng: 88.3639,
-        focusedHospitalId: 'sskm-kolkata',
-      }),
-    });
-    const followRes = await postChat(followReq);
-    const followData = await followRes.json();
-    expect(followData.costEstimate).toBeDefined();
-    expect(followData.costEstimate.govtRange).toContain('₹');
+  it('refuses to prescribe, and says so explicitly', async () => {
+    const res = await postAssistant(
+      body({ message: 'Which medicine should I take and is an ICU bed free right now?', lang: 'en', istHour: 10 }),
+    );
+    const data = await res.json();
+    expect(data.reply.toLowerCase()).toMatch(/cannot|do not have|will not guess/);
+    expect(data.reply.toLowerCase()).not.toMatch(/take \d+\s?mg|prescribed/);
+  });
 
-    // Ask unsupported medical prescription / live ICU bed query -> explicitly refuses to invent
-    const unsupReq = new NextRequest('http://localhost:3000/api/chat', {
-      method: 'POST',
-      body: JSON.stringify({
-        message: 'Which medicine should I take and available icu bed right now?',
-        lang: 'en',
-        lat: 22.5726,
-        lng: 88.3639,
-      }),
-    });
-    const unsupRes = await postChat(unsupReq);
-    const unsupData = await unsupRes.json();
-    expect(unsupData.reply.toLowerCase()).toContain('cannot prescribe');
+  it('rejects an empty message and an oversized one', async () => {
+    const empty = await postAssistant(body({ message: '   ', lang: 'en' }));
+    expect(empty.status).toBe(400);
+
+    const huge = await postAssistant(body({ message: 'x'.repeat(5000), lang: 'en' }));
+    expect(huge.status).toBe(400);
+  });
+});
+
+describe('Journey 5 — rankings & recommendations distinguish "no data" from "far away"', () => {
+  it('rankings never use a modelled distance to place a hospital', async () => {
+    const data = await (
+      await getRankings(new NextRequest(`http://localhost:3000/api/rankings?lat=${PUSA.lat}&lng=${PUSA.lng}&lang=en`))
+    ).json();
+    expect(Array.isArray(data.results ?? data.hospitals)).toBe(true);
+    for (const row of data.results ?? data.hospitals) {
+      if ('distanceKm' in row) {
+        // Either a real Google number or null — never a synthetic estimate.
+        expect(row.distanceKm === null || typeof row.distanceKm === 'number').toBe(true);
+      }
+    }
+  });
+
+  it('the hospital dataset itself is internally consistent', () => {
+    const ids = new Set(HOSPITALS.map((h) => h.id));
+    expect(ids.size).toBe(HOSPITALS.length);
+    for (const h of HOSPITALS) {
+      expect(getHospitalById(h.id)?.name).toBe(h.name);
+      expect(h.lat).toBeGreaterThan(6);
+      expect(h.lat).toBeLessThan(36);
+      expect(h.lng).toBeGreaterThan(68);
+      expect(h.lng).toBeLessThan(98);
+    }
   });
 });

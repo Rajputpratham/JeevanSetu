@@ -2,19 +2,21 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  Sparkles, Loader2, LocateFixed, CheckCircle2, AlertTriangle, PhoneCall,
+  Sparkles, Loader2, CheckCircle2, AlertTriangle, PhoneCall,
   Stethoscope, Info, AlertCircle, Landmark, Building2, ShieldCheck,
 } from 'lucide-react';
 import { useUserLocation } from '@/lib/useLocation';
+import LocationControls from '@/components/LocationControls';
 import { ALL_SPECIALITIES } from '@/data/hospitals';
 import { specialityForProblem } from '@/lib/recommend';
-import { formatDistance } from '@/lib/geo';
+import { formatDrivingKm } from '@/lib/geo';
+import { distanceStrings } from '@/lib/ui-strings';
 import { useLang } from '@/lib/i18n';
 import { tFacility, tPresetLabel, tSpeciality } from '@/lib/i18n-data';
 
 interface RecResult {
   hospital: { id: string; name: string; shortName: string; type: 'government' | 'private'; phone: string | null; emergency: string; facilities: string[]; costProfile: string };
-  distanceKm: number;
+  distanceKm: number | null;
   score: number;
   reasons: string[];
   cautions: string[];
@@ -24,7 +26,7 @@ const FACILITY_OPTIONS = ['Emergency 24×7', 'ICU', 'Dialysis', 'Maternity & Del
 
 export default function RecommendationsClient({ initialSpeciality }: { initialSpeciality?: string }) {
   const { t, lang } = useLang();
-  const { location, requestGeolocation, status: geoStatus } = useUserLocation();
+  const { location, hasLocation } = useUserLocation();
 
   const [problem, setProblem] = useState('');
   const [speciality, setSpeciality] = useState(initialSpeciality ?? '');
@@ -46,9 +48,14 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
     const params = new URLSearchParams({
       speciality: spec, type: typePref, budget,
       facilities: facilities.join(','),
-      lat: String(location.lat), lng: String(location.lng),
       lang,
     });
+    // Only send a real origin; the API treats a missing origin as "unknown"
+    // rather than substituting a city.
+    if (hasLocation) {
+      params.set('lat', String(location.lat));
+      params.set('lng', String(location.lng));
+    }
     try {
       const res = await fetch(`/api/recommendations?${params}`);
       const data = await res.json();
@@ -61,7 +68,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
     } finally {
       setBusy(false);
     }
-  }, [typePref, budget, facilities, location.lat, location.lng, problem, lang, t]);
+  }, [typePref, budget, facilities, hasLocation, location.lat, location.lng, problem, lang, t]);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -90,12 +97,11 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
   const toggleFacility = (f: string) =>
     setFacilities((prev) => (prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f]));
 
-  const locationDisplay =
-    location.source === 'default'
-      ? t('defaultLocationLabel')
-      : location.source === 'geolocation'
-        ? t('yourLocation')
-        : tPresetLabel(location.label, lang);
+  const locationDisplay = hasLocation
+    ? location.source === 'geolocation'
+      ? t('yourLocation')
+      : tPresetLabel(location.label, lang)
+    : t('noLocationSet');
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
@@ -171,10 +177,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
               {busy ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
               {busy ? t('recFindingBtn') : t('recGetBtn')}
             </button>
-            <button type="button" onClick={requestGeolocation} disabled={geoStatus === 'locating'} className="btn-ghost text-sm" title={t('recRefreshLocationTitle')}>
-              {geoStatus === 'locating' ? <Loader2 size={17} className="animate-spin" /> : <LocateFixed size={17} />}
-              {location.source === 'geolocation' ? t('recLocationOn') : t('useMyLocation')}
-            </button>
+            <LocationControls compact className="sm:max-w-xs" />
           </div>
           <p className="text-[11px] text-slate-500 -mt-2 flex items-center gap-1.5"><ShieldCheck size={12} />{t('distancesFromLabel')} {locationDisplay}</p>
         </form>
@@ -227,7 +230,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
                           <div className="min-w-0">
                             <h2 className="font-bold text-slate-900 leading-snug"><Link href={`/hospitals/${h.id}`} className="hover:text-brand-800 hover:underline">{h.name}</Link></h2>
                             <p className="text-xs text-slate-500 mt-1">
-                              {h.type === 'government' ? t('recGovtDesc') : t('recPrivateDesc')} · {formatDistance(r.distanceKm, lang)} {t('away')} {h.emergency === 'verified' && `· ${t('recEmergencyVerified')}`}
+                              {h.type === 'government' ? t('recGovtDesc') : t('recPrivateDesc')} · {formatDrivingKm(r.distanceKm, lang) ?? distanceStrings(lang).distanceUnavailable} {t('away')} {h.emergency === 'verified' && `· ${t('recEmergencyVerified')}`}
                             </p>
                           </div>
                         </div>
