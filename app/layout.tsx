@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import SkipLink from '@/components/SkipLink';
 import { LanguageProvider } from '@/lib/i18n';
 import { CompareProvider } from '@/lib/compare';
 
@@ -37,9 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen flex flex-col">
         <LanguageProvider>
           <CompareProvider>
-            <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-2 focus:left-2 focus:z-[100] focus:bg-brand-800 focus:text-white focus:px-4 focus:py-3 focus:rounded-xl focus:font-bold">
-              Skip to main content
-            </a>
+            <SkipLink />
             <Header />
             <main id="main-content" className="flex-1">{children}</main>
             <Footer />

@@ -42,10 +42,13 @@ export const CITY_PRESETS: { label: string; lat: number; lng: number; state: str
   { label: 'Dehradun', lat: 30.3165, lng: 78.0322, state: 'Uttarakhand' },
 ];
 
+export type GeoErrorCode = 'unavailable' | 'denied' | 'failed';
+
 export function useUserLocation() {
   const [location, setLocation] = useState<UserLocation>(DEFAULT_LOCATION);
   const [status, setStatus] = useState<'idle' | 'locating' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<GeoErrorCode | null>(null);
 
   useEffect(() => {
     try {
@@ -67,11 +70,13 @@ export function useUserLocation() {
   const requestGeolocation = useCallback(() => {
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setStatus('error');
+      setErrorCode('unavailable');
       setError('Location is not available on this device. Please pick a city below.');
       return;
     }
     setStatus('locating');
     setError(null);
+    setErrorCode(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         persist({
@@ -84,8 +89,10 @@ export function useUserLocation() {
       },
       (err) => {
         setStatus('error');
+        const denied = err.code === err.PERMISSION_DENIED;
+        setErrorCode(denied ? 'denied' : 'failed');
         setError(
-          err.code === err.PERMISSION_DENIED
+          denied
             ? 'Location permission was denied. You can still search by typing your city below.'
             : 'Could not detect your location. Please try again or pick a city below.',
         );
@@ -97,8 +104,9 @@ export function useUserLocation() {
   const setManual = useCallback((lat: number, lng: number, label: string, source: 'manual' | 'preset' = 'manual') => {
     setStatus('idle');
     setError(null);
+    setErrorCode(null);
     persist({ lat, lng, label, source });
   }, [persist]);
 
-  return { location, setManual, requestGeolocation, status, error };
+  return { location, setManual, requestGeolocation, status, error, errorCode };
 }

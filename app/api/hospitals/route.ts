@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HOSPITALS } from '@/data/hospitals';
 import { haversineKm } from '@/lib/geo';
 import { HospitalType } from '@/data/types';
+import { CITY_HI, FACILITY_HI, SPECIALITY_HI, STATE_HI } from '@/lib/i18n-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,6 +21,7 @@ export function GET(request: NextRequest) {
     const emergencyOnly = sp.get('emergency') === '1';
     const q = (sp.get('q') ?? '').trim().toLowerCase();
     const sort = sp.get('sort') ?? 'distance';
+    const lang = sp.get('lang') === 'hi' ? 'hi' : 'en';
 
     if (Number.isNaN(lat) || Number.isNaN(lng)) {
       return NextResponse.json({ error: 'Invalid coordinates' }, { status: 400 });
@@ -32,7 +34,20 @@ export function GET(request: NextRequest) {
     if (emergencyOnly) results = results.filter((h) => h.emergency === 'verified' || h.emergency === 'unverified');
     if (q) {
       results = results.filter((h) =>
-        [h.name, h.shortName, h.city, h.state, h.address, ...h.specialities, ...h.facilities]
+        [
+          h.name,
+          h.shortName,
+          h.city,
+          CITY_HI[h.city] ?? '',
+          h.state,
+          STATE_HI[h.state] ?? '',
+          h.address,
+          h.type === 'government' ? 'सरकारी' : 'निजी',
+          ...h.specialities,
+          ...h.specialities.map((s) => SPECIALITY_HI[s] ?? ''),
+          ...h.facilities,
+          ...h.facilities.map((f) => FACILITY_HI[f] ?? ''),
+        ]
           .join(' ')
           .toLowerCase()
           .includes(q),
@@ -41,7 +56,7 @@ export function GET(request: NextRequest) {
 
     const withinRadius = results.filter((h) => h.distanceKm <= radius);
     // If the radius hides everything, return the nearest matches anyway and say so.
-    const fellBack = withinRadius.length === 0;
+    const fellBack = withinRadius.length === 0 && results.length > 0;
     const finalList = fellBack ? results : withinRadius;
 
     finalList.sort((a, b) => {
@@ -50,11 +65,16 @@ export function GET(request: NextRequest) {
       return a.distanceKm - b.distanceKm;
     });
 
+    const fellBackNote = lang === 'hi'
+      ? 'चुनी गई दूरी के भीतर कोई अस्पताल नहीं मिला — इसके बजाय सबसे नज़दीकी अस्पताल दिखाए जा रहे हैं।'
+      : 'No hospitals within the selected radius — showing the nearest hospitals instead.';
+
     return NextResponse.json({
       count: finalList.length,
       totalInDataset: HOSPITALS.length,
       radiusKm: radius,
-      note: fellBack ? 'No hospitals within the selected radius — showing the nearest hospitals instead.' : undefined,
+      fellBack,
+      note: fellBack ? fellBackNote : undefined,
       results: finalList,
     });
   } catch (err) {

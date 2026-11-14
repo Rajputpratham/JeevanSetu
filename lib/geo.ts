@@ -10,11 +10,11 @@ export function haversineKm(aLat: number, aLng: number, bLat: number, bLng: numb
   return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-export function formatDistance(km: number | null): string {
-  if (km === null || Number.isNaN(km)) return 'Distance unknown';
-  if (km < 1) return `${Math.round(km * 1000)} m`;
-  if (km < 100) return `${km.toFixed(1)} km`;
-  return `${Math.round(km)} km`;
+export function formatDistance(km: number | null, lang: 'en' | 'hi' = 'en'): string {
+  if (km === null || Number.isNaN(km)) return lang === 'hi' ? 'दूरी अज्ञात' : 'Distance unknown';
+  if (km < 1) return `${Math.round(km * 1000)} ${lang === 'hi' ? 'मी' : 'm'}`;
+  if (km < 100) return `${km.toFixed(1)} ${lang === 'hi' ? 'किमी' : 'km'}`;
+  return `${Math.round(km)} ${lang === 'hi' ? 'किमी' : 'km'}`;
 }
 
 /** Google Maps directions link — opens in the user's own maps app/browser. */

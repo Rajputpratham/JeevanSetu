@@ -7,13 +7,20 @@ export const dynamic = 'force-dynamic';
 export function GET(request: NextRequest) {
   try {
     const sp = request.nextUrl.searchParams;
+    const lang = sp.get('lang') === 'hi' ? 'hi' : 'en';
     const problem = (sp.get('problem') ?? '').trim();
     let speciality = sp.get('speciality') ?? '';
     if (!speciality && problem) speciality = specialityForProblem(problem) ?? '';
 
     if (!speciality || !ALL_SPECIALITIES.includes(speciality)) {
       return NextResponse.json(
-        { error: 'Please choose a valid medical speciality or describe your problem more clearly.', mappedSpeciality: speciality || null },
+        {
+          error:
+            lang === 'hi'
+              ? 'कृपया एक मान्य चिकित्सा विशेषता चुनें या अपनी समस्या अधिक स्पष्ट लिखें।'
+              : 'Please choose a valid medical speciality or describe your problem more clearly.',
+          mappedSpeciality: speciality || null,
+        },
         { status: 400 },
       );
     }
@@ -27,7 +34,15 @@ export function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid location coordinates' }, { status: 400 });
     }
 
-    const results = recommendHospitals(HOSPITALS, { speciality, typePreference, budget, facilitiesWanted, lat, lng });
+    const results = recommendHospitals(HOSPITALS, {
+      speciality,
+      typePreference,
+      budget,
+      facilitiesWanted,
+      lat,
+      lng,
+      lang,
+    });
 
     return NextResponse.json({
       speciality,
@@ -35,7 +50,9 @@ export function GET(request: NextRequest) {
       count: results.length,
       results,
       disclaimer:
-        'Recommendations are based on listed facilities, approximate distance and affordability signals — they are NOT medical advice or a guarantee of care. Always confirm services by phone before travel.',
+        lang === 'hi'
+          ? 'सुझाव सूचीबद्ध सुविधाओं, अनुमानित दूरी और किफ़ायती संकेतों पर आधारित हैं — ये चिकित्सा सलाह या इलाज की गारंटी नहीं हैं। जाने से पहले फ़ोन पर पुष्टि ज़रूर करें।'
+          : 'Recommendations are based on listed facilities, approximate distance and affordability signals — they are NOT medical advice or a guarantee of care. Always confirm services by phone before travel.',
     });
   } catch (err) {
     console.error('[api/recommendations]', err);
