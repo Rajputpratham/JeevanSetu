@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
 
 export interface UserLocation {
   lat: number;
@@ -40,11 +40,24 @@ export const CITY_PRESETS: { label: string; lat: number; lng: number; state: str
   { label: 'Nagpur', lat: 21.1458, lng: 79.0882, state: 'Maharashtra' },
   { label: 'Varanasi', lat: 25.3176, lng: 82.9739, state: 'Uttar Pradesh' },
   { label: 'Dehradun', lat: 30.3165, lng: 78.0322, state: 'Uttarakhand' },
+  { label: 'Bhubaneswar', lat: 20.2961, lng: 85.8245, state: 'Odisha' },
+  { label: 'Kochi', lat: 9.9312, lng: 76.2673, state: 'Kerala' },
 ];
 
 export type GeoErrorCode = 'unavailable' | 'denied' | 'failed';
 
-export function useUserLocation() {
+interface LocationCtxValue {
+  location: UserLocation;
+  setManual: (lat: number, lng: number, label: string, source?: 'manual' | 'preset') => void;
+  requestGeolocation: () => void;
+  status: 'idle' | 'locating' | 'error';
+  error: string | null;
+  errorCode: GeoErrorCode | null;
+}
+
+const LocationCtx = createContext<LocationCtxValue | null>(null);
+
+function useLocationInternal(): LocationCtxValue {
   const [location, setLocation] = useState<UserLocation>(DEFAULT_LOCATION);
   const [status, setStatus] = useState<'idle' | 'locating' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +68,7 @@ export function useUserLocation() {
       const saved = window.localStorage.getItem(STORAGE);
       if (saved) {
         const parsed = JSON.parse(saved) as UserLocation;
-        if (typeof parsed?.lat === 'number' && typeof parsed?.lng === 'number') {
+        if (typeof parsed?.lat === 'number' && typeof parsed?.lng === 'number' && !Number.isNaN(parsed.lat) && !Number.isNaN(parsed.lng)) {
           setLocation(parsed);
         }
       }
@@ -80,8 +93,8 @@ export function useUserLocation() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         persist({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
+          lat: Number(pos.coords.latitude.toFixed(5)),
+          lng: Number(pos.coords.longitude.toFixed(5)),
           label: 'Your current location',
           source: 'geolocation',
         });
@@ -97,7 +110,7 @@ export function useUserLocation() {
             : 'Could not detect your location. Please try again or pick a city below.',
         );
       },
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 180000 },
     );
   }, [persist]);
 
@@ -105,8 +118,19 @@ export function useUserLocation() {
     setStatus('idle');
     setError(null);
     setErrorCode(null);
-    persist({ lat, lng, label, source });
+    persist({ lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)), label, source });
   }, [persist]);
 
   return { location, setManual, requestGeolocation, status, error, errorCode };
+}
+
+export function LocationProvider({ children }: { children: ReactNode }) {
+  const val = useLocationInternal();
+  return <LocationCtx.Provider value={val}>{children}</LocationCtx.Provider>;
+}
+
+export function useUserLocation(): LocationCtxValue {
+  const ctx = useContext(LocationCtx);
+  const fallback = useLocationInternal();
+  return ctx ?? fallback;
 }

@@ -37,10 +37,20 @@ body {
   .label { @apply block text-sm font-semibold text-slate-700 mb-1.5; }
 }
 
-/* Leaflet map container */
-.leaflet-container { border-radius: 1rem; z-index: 0; font-family: inherit; }
+/* Leaflet map container — keep LTR inside map controls even when page is RTL (Urdu) */
+.leaflet-container { border-radius: 1rem; z-index: 0; font-family: inherit; direction: ltr; }
 .leaflet-popup-content-wrapper { border-radius: 0.75rem; }
 .js-map-marker { background: transparent; border: none; }
+
+/* RTL polish for Urdu (dir="rtl") */
+html[dir="rtl"] body {
+  line-height: 1.7;
+}
+html[dir="rtl"] input[type="tel"],
+html[dir="rtl"] a[href^="tel:"] {
+  direction: ltr;
+  unicode-bidi: embed;
+}
 
 /* Comparison table print styles */
 @media print {

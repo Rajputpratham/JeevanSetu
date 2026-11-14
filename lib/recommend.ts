@@ -1,6 +1,7 @@
 import { Hospital } from '@/data/types';
-import { haversineKm } from './geo';
+import { estimateTravelMetrics } from './geo';
 import { tFacility, tSpeciality } from './i18n-data';
+import type { Lang } from './lang-meta';
 
 export interface RecommendInput {
   speciality: string;
@@ -11,12 +12,14 @@ export interface RecommendInput {
   facilitiesWanted: string[];
   lat: number;
   lng: number;
-  lang?: 'en' | 'hi';
+  lang?: Lang;
 }
 
 export interface RecommendationResult {
   hospital: Hospital;
   distanceKm: number;
+  roadKm: number;
+  etaMinutes: number;
   score: number;
   reasons: string[];
   cautions: string[];
@@ -55,7 +58,10 @@ export function recommendHospitals(all: Hospital[], input: RecommendInput): Reco
       continue;
     }
 
-    const distanceKm = haversineKm(input.lat, input.lng, h.lat, h.lng);
+    const travel = estimateTravelMetrics(input.lat, input.lng, h.lat, h.lng);
+    const distanceKm = travel.roadKm;
+    const roadKm = travel.roadKm;
+    const etaMinutes = travel.trafficMinutes;
 
     // 2. Distance (graduated, not dominant).
     if (distanceKm <= 5) {
@@ -148,7 +154,7 @@ export function recommendHospitals(all: Hospital[], input: RecommendInput): Reco
       score += 3;
     }
 
-    results.push({ hospital: h, distanceKm, score, reasons, cautions });
+    results.push({ hospital: h, distanceKm, roadKm, etaMinutes, score, reasons, cautions });
   }
 
   return results.sort((a, b) => b.score - a.score).slice(0, 6);

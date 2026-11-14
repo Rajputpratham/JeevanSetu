@@ -1,5 +1,6 @@
 import { Treatment } from '@/data/types';
 import { tTreatmentTest } from './i18n-data';
+import type { Lang } from './lang-meta';
 
 export type RoomType = 'general' | 'semi-private' | 'private' | 'icu';
 export const ROOM_MULTIPLIER: Record<RoomType, number> = {
@@ -54,7 +55,7 @@ export const ESTIMATE_DISCLAIMER_HI =
 export function estimateTreatment(
   treatment: Treatment,
   input: EstimateInput,
-  lang: 'en' | 'hi' = 'en',
+  lang: Lang = 'en',
 ): EstimateResult {
   const lines: EstimateLine[] = [];
   const unavailable: string[] = [];
