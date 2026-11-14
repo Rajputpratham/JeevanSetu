@@ -9,7 +9,8 @@ import { useCompare, MAX_COMPARE } from '@/lib/compare';
 import { useUserLocation, CITY_PRESETS } from '@/lib/useLocation';
 import { HOSPITALS } from '@/data/hospitals';
 import { TREATMENTS } from '@/data/treatments';
-import { estimateTravelMetrics, formatDistance, formatDuration, directionsUrl } from '@/lib/geo';
+import { formatDrivingKm, formatDuration, directionsUrl } from '@/lib/geo';
+import { distanceStrings, locationStrings } from '@/lib/ui-strings';
 import { estimateTreatment } from '@/lib/cost-estimate';
 import { formatRange } from '@/lib/format';
 import { Hospital } from '@/data/types';
@@ -43,7 +44,7 @@ const PROFILE_KEY: Record<Hospital['costProfile'], DictKey> = {
 export default function CompareClient() {
   const { t, lang } = useLang();
   const { ids, add, remove, clear, full } = useCompare();
-  const { location, setManual, requestGeolocation, status: geoStatus } = useUserLocation();
+  const { location, hasLocation, setManual, requestGeolocation, status: geoStatus } = useUserLocation();
   const [query, setQuery] = useState('');
   const [treatmentId, setTreatmentId] = useState('');
   const [notice, setNotice] = useState(false);
@@ -132,9 +133,70 @@ export default function CompareClient() {
     }
   };
 
+  /**
+   * ONE Google Routes snapshot for every compared hospital.
+   *
+   * Previously each column ran its own modelled estimate, so the comparison
+   * could disagree with the hospital cards. Now all columns come from a single
+   * `/api/travel` response, keyed by stable hospital ids.
+   */
+  const [legs, setLegs] = useState<Record<string, { distanceKm: number | null; etaMinutes: number | null; trafficImpactMinutes: number | null; straightKm: number | null }>>({});
+  const [legsBusy, setLegsBusy] = useState(false);
+  const [, setLegsNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!hasLocation || selected.length === 0 || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
+      setLegs({});
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    setLegsBusy(true);
+    fetch(
+      `/api/travel?lat=${location.lat}&lng=${location.lng}&source=${location.source}&ids=${encodeURIComponent(
+        selected.map((h) => h.id).join(','),
+      )}&lang=${lang}`,
+      { signal: controller.signal },
+    )
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: {
+        hospitals?: { id: string; distanceKm: number | null; etaMinutes: number | null; trafficImpactMinutes: number | null; straightKm: number | null }[];
+        blockers?: string[];
+      } | null) => {
+        if (cancelled) return;
+        const next: typeof legs = {};
+        for (const h of data?.hospitals ?? []) {
+          next[h.id] = {
+            distanceKm: h.distanceKm,
+            etaMinutes: h.etaMinutes,
+            trafficImpactMinutes: h.trafficImpactMinutes,
+            straightKm: h.straightKm,
+          };
+        }
+        setLegs(next);
+        setLegsNote(data?.blockers?.[0] ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setLegs({});
+      })
+      .finally(() => {
+        if (!cancelled) setLegsBusy(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [selected, hasLocation, location.lat, location.lng, location.source, lang]);
+
   const travels = useMemo(
-    () => selected.map((h) => estimateTravelMetrics(location.lat, location.lng, h.lat, h.lng)),
-    [selected, location.lat, location.lng],
+    () =>
+      selected.map((h) => ({
+        roadKm: legs[h.id]?.distanceKm ?? null,
+        trafficMinutes: legs[h.id]?.etaMinutes ?? null,
+        trafficImpactMinutes: legs[h.id]?.trafficImpactMinutes ?? null,
+        straightKm: legs[h.id]?.straightKm ?? null,
+      })),
+    [selected, legs],
   );
 
   // "Best" badges — computed only over selected hospitals
@@ -146,8 +208,11 @@ export default function CompareClient() {
         mostFac: null as string | null,
         cheapest: null as string | null,
       };
-    const roadDistances = travels.map((tr) => tr.roadKm);
-    const nearest = selected[roadDistances.indexOf(Math.min(...roadDistances))]?.id ?? null;
+    const known = travels.map((tr) => (typeof tr.roadKm === 'number' ? tr.roadKm : Number.POSITIVE_INFINITY));
+    const nearest =
+      known.some((d) => Number.isFinite(d)) && known.length > 0
+        ? selected[known.indexOf(Math.min(...known))]?.id ?? null
+        : null;
     const mostSpec = selected.reduce((a, b) => (b.specialities.length > a.specialities.length ? b : a)).id;
     const mostFac = selected.reduce((a, b) => (b.facilities.length > a.facilities.length ? b : a)).id;
     let cheapest: string | null = null;
@@ -192,12 +257,13 @@ export default function CompareClient() {
       ? treatment.hindiName
       : treatment.name
     : '';
-  const locationDisplay =
-    location.source === 'geolocation'
+  const ds = distanceStrings(lang);
+  const ls = locationStrings(lang);
+  const locationDisplay = hasLocation
+    ? location.source === 'geolocation'
       ? t('yourLocationLabel')
-      : location.source === 'default'
-        ? t('defaultLocationLabel')
-        : tPresetLabel(location.label, lang);
+      : tPresetLabel(location.label, lang)
+    : ls.notSet;
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
@@ -430,7 +496,14 @@ export default function CompareClient() {
                     </a>
                   )}
                   <a
-                    href={directionsUrl(h.lat, h.lng, h.shortName, { lat: location.lat, lng: location.lng })}
+                    href={directionsUrl(
+                      h.lat,
+                      h.lng,
+                      h.shortName,
+                      hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
+                        ? { lat: location.lat, lng: location.lng }
+                        : null,
+                    )}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={t('directionsHospitalAria', { name: h.shortName })}
@@ -447,11 +520,22 @@ export default function CompareClient() {
               {selected.map((h, i) => (
                 <Cell key={h.id}>
                   <p className="text-lg font-extrabold text-brand-900" data-testid={`compare-dist-${h.id}`}>
-                    {formatDistance(travels[i].roadKm, lang)}
+                    {legsBusy ? '…' : formatDrivingKm(travels[i].roadKm, lang) ?? '—'}
                   </p>
                   <p className="text-xs font-semibold text-slate-600 flex items-center gap-1 mt-0.5" data-testid={`compare-eta-${h.id}`}>
-                    <Clock size={12} /> ~{formatDuration(travels[i].trafficMinutes, lang)}
+                    <Clock size={12} />{' '}
+                    {typeof travels[i].trafficMinutes === 'number'
+                      ? `~${formatDuration(travels[i].trafficMinutes, lang)}`
+                      : ds.noLiveTraffic}
                   </p>
+                  {typeof travels[i].trafficImpactMinutes === 'number' && travels[i].trafficImpactMinutes > 0 && (
+                    <p className="mt-0.5 text-[10px] font-semibold text-amber-900">
+                      {ds.trafficImpact}: +{travels[i].trafficImpactMinutes} min
+                    </p>
+                  )}
+                  {!hasLocation && (
+                    <p className="mt-0.5 text-[10px] text-amber-800">{ds.distanceUnavailable}</p>
+                  )}
                   {best.nearest === h.id && <Badge text={t('nearestBadge')} />}
                 </Cell>
               ))}
@@ -639,10 +723,14 @@ export default function CompareClient() {
                   )}
                   <div className="mt-1.5 flex flex-col gap-1">
                     <a
-                      href={directionsUrl(h.lat, h.lng, h.shortName, {
-                        lat: location.lat,
-                        lng: location.lng,
-                      })}
+                      href={directionsUrl(
+                        h.lat,
+                        h.lng,
+                        h.shortName,
+                        hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
+                          ? { lat: location.lat, lng: location.lng }
+                          : null,
+                      )}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-flex items-center gap-1.5 text-xs font-bold text-brand-800 hover:underline"

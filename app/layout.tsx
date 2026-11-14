@@ -3,7 +3,7 @@ import './globals.css';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import SkipLink from '@/components/SkipLink';
-import ChatbotWidget from '@/components/ChatbotWidget';
+import AssistantWidget from '@/components/assistant/AssistantWidget';
 import { LanguageProvider } from '@/lib/i18n';
 import { LocationProvider } from '@/lib/useLocation';
 import { CompareProvider } from '@/lib/compare';
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: '%s | JeevanSetu',
   },
   description:
-    'JeevanSetu helps families across India find nearby hospitals, check road travel time, compare facilities and transparent community ratings, estimate treatment costs in ₹ and reach 24×7 emergency care across 11 languages.',
+    'JeevanSetu helps families across India find nearby hospitals with verified Google driving distances, compare facilities and transparent community ratings, estimate treatment costs in ₹, reach 24×7 emergency care and ask the JeevanSetu AI Assistant — across 11 languages.',
   keywords: [
     'hospitals near me',
     'government hospital',
@@ -58,7 +58,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   {children}
                 </main>
                 <Footer />
-                <ChatbotWidget />
+                <AssistantWidget />
               </SavedProvider>
             </CompareProvider>
           </LocationProvider>

@@ -1,24 +1,55 @@
 'use client';
-import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
+/**
+ * JeevanSetu central location store (React Context).
+ *
+ * Requirement 3 — PRECISE LOCATION DETECTION
+ *  • Explicit user action only. The browser permission prompt is never triggered
+ *    automatically.
+ *  • `enableHighAccuracy: true, timeout: 15000, maximumAge: 0`.
+ *  • The reported accuracy radius is always surfaced; we never claim "precise"
+ *    positioning when the browser reports a large radius.
+ *  • On failure we DO NOT silently fall back to Delhi. The origin becomes
+ *    "unknown" and every distance is withheld until the user picks a location.
+ *  • Optional live following with explicit start/stop, stopped on unmount.
+ *  • Nothing is persisted without consent (`locationConsent`).
+ */
+import { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+
+export type LocationSource = 'geolocation' | 'manual' | 'preset' | 'map' | 'unknown';
 
 export interface UserLocation {
-  lat: number;
-  lng: number;
+  lat: number | null;
+  lng: number | null;
   label: string;
-  /** 'default' = we don't know where the user is and assumed Delhi */
-  source: 'geolocation' | 'manual' | 'preset' | 'default';
+  source: LocationSource;
+  /** Reported GPS accuracy radius in metres (null when not from the device). */
+  accuracyM: number | null;
+  /** UTC ms timestamp of the fix. */
+  capturedAt: number | null;
 }
 
+export const EMPTY_LOCATION: UserLocation = {
+  lat: null,
+  lng: null,
+  label: 'Location not set',
+  source: 'unknown',
+  accuracyM: null,
+  capturedAt: null,
+};
+
+/** Last-resort preset the user can explicitly choose — never applied silently. */
 export const DEFAULT_LOCATION: UserLocation = {
   lat: 28.6139,
   lng: 77.2090,
-  label: 'New Delhi (default — share your location for accurate distances)',
-  source: 'default',
+  label: 'New Delhi (selected preset)',
+  source: 'preset',
+  accuracyM: null,
+  capturedAt: null,
 };
 
-const STORAGE = 'jeevansetu-location';
+const STORAGE = 'jeevansetu-location-v2';
+const CONSENT = 'jeevansetu-location-consent';
 
-/** Quick-pick Indian cities for offline/manual selection. */
 export const CITY_PRESETS: { label: string; lat: number; lng: number; state: string }[] = [
   { label: 'New Delhi', lat: 28.6139, lng: 77.2090, state: 'Delhi' },
   { label: 'Gurugram', lat: 28.4595, lng: 77.0266, state: 'Haryana' },
@@ -44,84 +75,358 @@ export const CITY_PRESETS: { label: string; lat: number; lng: number; state: str
   { label: 'Kochi', lat: 9.9312, lng: 76.2673, state: 'Kerala' },
 ];
 
-export type GeoErrorCode = 'unavailable' | 'denied' | 'failed';
+export type GeoErrorCode =
+  | 'unavailable' // browser has no geolocation at all
+  | 'denied' // permission refused
+  | 'position-unavailable' // GPS disabled / no fix
+  | 'timeout'
+  | 'insecure-context' // page not served over HTTPS
+  | 'low-accuracy'
+  | 'reverse-geocode-failed'
+  | 'failed';
+
+/** Anything above this radius is reported as low accuracy rather than "precise". */
+export const LOW_ACCURACY_THRESHOLD_M = 250;
+
+export interface PreciseFix {
+  lat: number;
+  lng: number;
+  accuracyM: number;
+  label: string;
+  timestamp: number;
+  isLowAccuracy: boolean;
+  reverseGeocodeStatus: 'ok' | 'failed' | 'skipped';
+}
 
 interface LocationCtxValue {
   location: UserLocation;
-  setManual: (lat: number, lng: number, label: string, source?: 'manual' | 'preset') => void;
+  /**
+   * Numeric origin for call sites that already guard on `hasLocation`.
+   * When unknown this is NaN on purpose: a NaN origin makes `Number.isFinite`
+   * checks fail loudly instead of quietly routing from (0,0).
+   */
+  coords: { lat: number; lng: number };
+  /** True only when we have a usable numeric origin. */
+  hasLocation: boolean;
+  /** Convenience origin for services; null when unknown. */
+  origin: { lat: number; lng: number } | null;
+  setManual: (lat: number, lng: number, label: string, source?: LocationSource) => void;
   requestGeolocation: () => void;
-  status: 'idle' | 'locating' | 'error';
+  clearLocation: () => void;
+  status: 'idle' | 'locating' | 'tracking' | 'error';
   error: string | null;
   errorCode: GeoErrorCode | null;
+  /** Latest successful device fix (used for the accuracy circle on the map). */
+  lastFix: PreciseFix | null;
+  /** Live following controls. */
+  startTracking: () => void;
+  stopTracking: () => void;
+  isTracking: boolean;
+  reverseGeocoding: boolean;
+  /** True when the user explicitly allowed their origin to be remembered. */
+  consent: boolean;
 }
 
 const LocationCtx = createContext<LocationCtxValue | null>(null);
 
+function round5(n: number): number {
+  return Number(n.toFixed(5));
+}
+
+async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  try {
+    const res = await fetch(`/api/geocode/reverse?lat=${lat}&lng=${lng}`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { label?: string };
+    return typeof data.label === 'string' && data.label.length > 0 ? data.label : null;
+  } catch {
+    return null;
+  }
+}
+
 function useLocationInternal(): LocationCtxValue {
-  const [location, setLocation] = useState<UserLocation>(DEFAULT_LOCATION);
-  const [status, setStatus] = useState<'idle' | 'locating' | 'error'>('idle');
+  const [location, setLocation] = useState<UserLocation>(EMPTY_LOCATION);
+  const [status, setStatus] = useState<'idle' | 'locating' | 'tracking' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<GeoErrorCode | null>(null);
+  const [lastFix, setLastFix] = useState<PreciseFix | null>(null);
+  const [reverseGeocoding, setReverseGeocoding] = useState(false);
+  const [consent, setConsent] = useState(false);
+  const watchIdRef = useRef<number | null>(null);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
-    try {
-      const saved = window.localStorage.getItem(STORAGE);
-      if (saved) {
-        const parsed = JSON.parse(saved) as UserLocation;
-        if (typeof parsed?.lat === 'number' && typeof parsed?.lng === 'number' && !Number.isNaN(parsed.lat) && !Number.isNaN(parsed.lng)) {
-          setLocation(parsed);
-        }
-      }
-    } catch { /* ignore */ }
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
-  const persist = useCallback((loc: UserLocation) => {
+  // Restore a previously saved origin ONLY when consent was recorded.
+  useEffect(() => {
+    try {
+      const hadConsent = window.localStorage.getItem(CONSENT) === '1';
+      setConsent(hadConsent);
+      if (!hadConsent) {
+        window.localStorage.removeItem(STORAGE);
+        return;
+      }
+      const saved = window.localStorage.getItem(STORAGE);
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as UserLocation;
+      if (
+        typeof parsed?.lat === 'number' &&
+        typeof parsed?.lng === 'number' &&
+        Number.isFinite(parsed.lat) &&
+        Number.isFinite(parsed.lng)
+      ) {
+        setLocation(parsed);
+      }
+    } catch {
+      /* private mode / disabled storage */
+    }
+  }, []);
+
+  const persist = useCallback((loc: UserLocation, grantConsent: boolean) => {
     setLocation(loc);
-    try { window.localStorage.setItem(STORAGE, JSON.stringify(loc)); } catch { /* ignore */ }
+    try {
+      if (grantConsent) {
+        window.localStorage.setItem(CONSENT, '1');
+        window.localStorage.setItem(STORAGE, JSON.stringify(loc));
+        setConsent(true);
+      } else if (window.localStorage.getItem(CONSENT) === '1') {
+        window.localStorage.setItem(STORAGE, JSON.stringify(loc));
+      }
+    } catch {
+      /* ignore quota / privacy-mode errors */
+    }
+  }, []);
+
+  const stopTracking = useCallback(() => {
+    if (watchIdRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+    }
+    watchIdRef.current = null;
+    setStatus((s) => (s === 'tracking' ? 'idle' : s));
+  }, []);
+
+  const applyFix = useCallback(
+    (position: GeolocationPosition) => {
+      const accuracyM = Math.round(position.coords.accuracy ?? 0);
+      const lat = round5(position.coords.latitude);
+      const lng = round5(position.coords.longitude);
+      const isLowAccuracy = accuracyM > LOW_ACCURACY_THRESHOLD_M;
+
+      const provisional: UserLocation = {
+        lat,
+        lng,
+        label: isLowAccuracy
+          ? `Approximate device location (±${accuracyM} m)`
+          : `Your current location (±${accuracyM} m)`,
+        source: 'geolocation',
+        accuracyM,
+        capturedAt: position.timestamp ?? Date.now(),
+      };
+      persist(provisional, true);
+      setLastFix({
+        lat,
+        lng,
+        accuracyM,
+        label: provisional.label,
+        timestamp: provisional.capturedAt ?? Date.now(),
+        isLowAccuracy,
+        reverseGeocodeStatus: 'skipped',
+      });
+      setError(isLowAccuracy ? 'low-accuracy' : null);
+      setErrorCode(isLowAccuracy ? 'low-accuracy' : null);
+      setReverseGeocoding(true);
+
+      void reverseGeocode(lat, lng).then((label) => {
+        if (!mountedRef.current) return;
+        setReverseGeocoding(false);
+        if (label) {
+          const refined: UserLocation = { ...provisional, label };
+          setLocation(refined);
+          try {
+            if (window.localStorage.getItem(CONSENT) === '1') {
+              window.localStorage.setItem(STORAGE, JSON.stringify(refined));
+            }
+          } catch {
+            /* ignore */
+          }
+          setLastFix((prev) =>
+            prev ? { ...prev, label, reverseGeocodeStatus: 'ok' } : prev,
+          );
+        } else {
+          setLastFix((prev) => (prev ? { ...prev, reverseGeocodeStatus: 'failed' } : prev));
+        }
+      });
+    },
+    [persist],
+  );
+
+  const mapGeolocationError = useCallback((err: GeolocationPositionError) => {
+    setStatus('error');
+    if (err.code === err.PERMISSION_DENIED) {
+      setErrorCode('denied');
+      setError(
+        'Location permission was denied, so no coordinates were guessed. Search by address, enter a PIN code, or pick your city below.',
+      );
+      return;
+    }
+    if (err.code === err.POSITION_UNAVAILABLE) {
+      setErrorCode('position-unavailable');
+      setError(
+        'Your device could not obtain a GPS fix (GPS may be switched off). Try again outdoors, or search by address or PIN code.',
+      );
+      return;
+    }
+    setErrorCode('timeout');
+    setError('Location detection timed out. Try again, or search by address or PIN code.');
   }, []);
 
   const requestGeolocation = useCallback(() => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      setStatus('error');
-      setErrorCode('unavailable');
-      setError('Location is not available on this device. Please pick a city below.');
-      return;
-    }
-    setStatus('locating');
     setError(null);
     setErrorCode(null);
+
+    if (typeof window === 'undefined' || !navigator.geolocation) {
+      setStatus('error');
+      setErrorCode('unavailable');
+      setError('This browser does not support location detection. Please search by address, PIN code or city.');
+      return;
+    }
+    if (!window.isSecureContext) {
+      setStatus('error');
+      setErrorCode('insecure-context');
+      setError(
+        'Location can only be detected on a secure (HTTPS) connection. Please search by address or PIN code instead.',
+      );
+      return;
+    }
+
+    setStatus('locating');
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        persist({
-          lat: Number(pos.coords.latitude.toFixed(5)),
-          lng: Number(pos.coords.longitude.toFixed(5)),
-          label: 'Your current location',
-          source: 'geolocation',
-        });
+        if (!mountedRef.current) return;
+        applyFix(pos);
         setStatus('idle');
       },
       (err) => {
-        setStatus('error');
-        const denied = err.code === err.PERMISSION_DENIED;
-        setErrorCode(denied ? 'denied' : 'failed');
-        setError(
-          denied
-            ? 'Location permission was denied. You can still search by typing your city below.'
-            : 'Could not detect your location. Please try again or pick a city below.',
-        );
+        if (!mountedRef.current) return;
+        mapGeolocationError(err);
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 180000 },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
     );
-  }, [persist]);
+  }, [applyFix, mapGeolocationError]);
 
-  const setManual = useCallback((lat: number, lng: number, label: string, source: 'manual' | 'preset' = 'manual') => {
+  const startTracking = useCallback(() => {
+    setError(null);
+    setErrorCode(null);
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setStatus('error');
+      setErrorCode('unavailable');
+      setError('This browser does not support live location following.');
+      return;
+    }
+    if (!window.isSecureContext) {
+      setStatus('error');
+      setErrorCode('insecure-context');
+      setError('Live location following requires HTTPS.');
+      return;
+    }
+    if (watchIdRef.current !== null) return;
+
+    setStatus('tracking');
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (!mountedRef.current) return;
+        applyFix(pos);
+      },
+      (err) => {
+        if (!mountedRef.current) return;
+        stopTracking();
+        mapGeolocationError(err);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
+    );
+  }, [applyFix, mapGeolocationError, stopTracking]);
+
+  // Always release the watcher when the provider unmounts.
+  useEffect(() => () => {
+    if (watchIdRef.current !== null && typeof navigator !== 'undefined' && navigator.geolocation) {
+      navigator.geolocation.clearWatch(watchIdRef.current);
+      watchIdRef.current = null;
+    }
+  }, []);
+
+  const setManual = useCallback(
+    (lat: number, lng: number, label: string, source: LocationSource = 'manual') => {
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      setStatus('idle');
+      setError(null);
+      setErrorCode(null);
+      setLastFix(null);
+      persist(
+        { lat: round5(lat), lng: round5(lng), label, source, accuracyM: null, capturedAt: Date.now() },
+        false,
+      );
+    },
+    [persist],
+  );
+
+  const clearLocation = useCallback(() => {
+    stopTracking();
     setStatus('idle');
     setError(null);
     setErrorCode(null);
-    persist({ lat: Number(lat.toFixed(5)), lng: Number(lng.toFixed(5)), label, source });
-  }, [persist]);
+    setLastFix(null);
+    setLocation(EMPTY_LOCATION);
+    try {
+      window.localStorage.removeItem(STORAGE);
+      window.localStorage.removeItem(CONSENT);
+      setConsent(false);
+    } catch {
+      /* ignore */
+    }
+  }, [stopTracking]);
 
-  return { location, setManual, requestGeolocation, status, error, errorCode };
+  const hasLocation =
+    typeof location.lat === 'number' && typeof location.lng === 'number' && Number.isFinite(location.lat);
+
+  return {
+    location,
+    coords: hasLocation
+      ? { lat: location.lat as number, lng: location.lng as number }
+      : { lat: Number.NaN, lng: Number.NaN },
+    hasLocation,
+    origin: hasLocation ? { lat: location.lat as number, lng: location.lng as number } : null,
+    setManual,
+    requestGeolocation,
+    clearLocation,
+    status,
+    error,
+    errorCode,
+    lastFix,
+    startTracking,
+    stopTracking,
+    isTracking: status === 'tracking',
+    reverseGeocoding,
+    /** True when the user has explicitly allowed this device's location to be remembered. */
+    consent,
+  };
+}
+
+/** Exposed so callers can render the consent notice state. */
+export function useLocationConsent(): boolean {
+  const [granted, setGranted] = useState(false);
+  useEffect(() => {
+    try {
+      setGranted(window.localStorage.getItem(CONSENT) === '1');
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  return granted;
 }
 
 export function LocationProvider({ children }: { children: ReactNode }) {
@@ -129,8 +434,32 @@ export function LocationProvider({ children }: { children: ReactNode }) {
   return <LocationCtx.Provider value={val}>{children}</LocationCtx.Provider>;
 }
 
+/**
+ * Safe accessor. Previously this fell back to a NEW independent state instance
+ * when no provider was found, which let different components hold different
+ * origins — a direct cause of inconsistent distances. Callers now get an empty
+ * (unknown) origin in that case, so nothing can display a wrong number.
+ */
 export function useUserLocation(): LocationCtxValue {
   const ctx = useContext(LocationCtx);
-  const fallback = useLocationInternal();
-  return ctx ?? fallback;
+  return ctx ?? FALLBACK_CTX;
 }
+
+const FALLBACK_CTX: LocationCtxValue = {
+  location: EMPTY_LOCATION,
+  coords: { lat: Number.NaN, lng: Number.NaN },
+  hasLocation: false,
+  origin: null,
+  setManual: () => {},
+  requestGeolocation: () => {},
+  clearLocation: () => {},
+  status: 'idle',
+  error: null,
+  errorCode: null,
+  lastFix: null,
+  startTracking: () => {},
+  stopTracking: () => {},
+  isTracking: false,
+  reverseGeocoding: false,
+  consent: false,
+};

@@ -6,18 +6,24 @@ import { useUserLocation } from '@/lib/useLocation';
 import HospitalCard, { EnrichedHospital } from '@/components/HospitalCard';
 import { useLang } from '@/lib/i18n';
 import { tPresetLabel } from '@/lib/i18n-data';
+import { locationStrings } from '@/lib/ui-strings';
 
 export default function NearbySection() {
-  const { location, requestGeolocation, status, errorCode } = useUserLocation();
+  const { location, hasLocation, requestGeolocation, status, errorCode } = useUserLocation();
   const { t, lang } = useLang();
   const [hospitals, setHospitals] = useState<EnrichedHospital[] | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
+    if (!hasLocation) {
+      setHospitals([]);
+      setFailed(false);
+      return;
+    }
     let cancelled = false;
     setHospitals(null);
     setFailed(false);
-    fetch(`/api/hospitals?lat=${location.lat}&lng=${location.lng}&radius=1000&sort=distance&lang=${lang}`)
+    fetch(`/api/hospitals?lat=${location.lat}&lng=${location.lng}&source=${location.source}&radius=1000&sort=distance&lang=${lang}`)
       .then((r) => {
         if (!r.ok) throw new Error('bad response');
         return r.json();
@@ -31,14 +37,13 @@ export default function NearbySection() {
     return () => {
       cancelled = true;
     };
-  }, [location.lat, location.lng, lang]);
+  }, [hasLocation, location.lat, location.lng, location.source, lang]);
 
-  const locDisplay =
-    location.source === 'geolocation'
+  const locDisplay = hasLocation
+    ? location.source === 'geolocation'
       ? t('yourLocation')
-      : location.source === 'default'
-        ? t('defaultLocationLabel')
-        : tPresetLabel(location.label, lang);
+      : tPresetLabel(location.label, lang)
+    : locationStrings(lang).notSet;
 
   return (
     <section aria-labelledby="nearby-heading" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">

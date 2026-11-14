@@ -1,18 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HOSPITALS } from '@/data/hospitals';
-import { estimateTravelMetrics } from '@/lib/geo';
 import { HospitalType } from '@/data/types';
 import { CITY_HI, FACILITY_HI, SPECIALITY_HI, STATE_HI } from '@/lib/i18n-data';
 import { computeCommunityScore, getAllReviews } from '@/lib/ratings';
 import { isValidLang } from '@/lib/lang-meta';
+import { getTravelSnapshot } from '@/lib/travel';
+import { cached, travelCacheKey } from '@/lib/travel-cache';
+import { resolveHospitalGeo } from '@/data/hospital-locations';
 
 export const dynamic = 'force-dynamic';
 
-export function GET(request: NextRequest) {
+const CACHE_TTL_MS = 60_000;
+
+/**
+ * GET /api/hospitals
+ *
+ * Distances come exclusively from the central travel service (Google Routes
+ * API). There is no modelled/tortuosity fallback: if Google is unavailable the
+ * hospital is returned with `distanceKm: null` and the response carries
+ * `distanceSource: 'unavailable'` so the UI can say so instead of guessing.
+ *
+ * `lat`/`lng` are REQUIRED. Omitting them no longer silently assumes Delhi.
+ */
+export async function GET(request: NextRequest) {
   try {
     const sp = request.nextUrl.searchParams;
-    const lat = parseFloat(sp.get('lat') ?? '28.6139');
-    const lng = parseFloat(sp.get('lng') ?? '77.2090');
+    const latRaw = sp.get('lat');
+    const lngRaw = sp.get('lng');
+
+    if (!latRaw || !lngRaw) {
+      return NextResponse.json(
+        {
+          error: 'lat and lng are required — JeevanSetu does not assume a default location.',
+          code: 'ORIGIN_REQUIRED',
+        },
+        { status: 400 },
+      );
+    }
+
+    const lat = parseFloat(latRaw);
+    const lng = parseFloat(lngRaw);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return NextResponse.json({ error: 'Invalid coordinates', code: 'BAD_ORIGIN' }, { status: 400 });
+    }
+
     const radius = Math.min(Math.max(parseFloat(sp.get('radius') ?? '500') || 500, 1), 1000);
     const typeRaw = sp.get('type');
     if (typeRaw && !['government', 'private', 'all'].includes(typeRaw)) {
@@ -25,37 +56,23 @@ export function GET(request: NextRequest) {
     const sort = sp.get('sort') ?? 'distance';
     const langParam = sp.get('lang') ?? 'en';
     const lang = isValidLang(langParam) ? langParam : 'en';
-
-    if (Number.isNaN(lat) || Number.isNaN(lng)) {
-      return NextResponse.json({ error: 'Invalid coordinates' }, { status: 400 });
-    }
+    const sourceRaw = sp.get('source');
+    const originSource =
+      sourceRaw === 'geolocation' || sourceRaw === 'manual' || sourceRaw === 'preset' || sourceRaw === 'map'
+        ? sourceRaw
+        : 'unknown';
 
     const allReviews = getAllReviews();
 
-    let results = HOSPITALS.map((h) => {
-      const travel = estimateTravelMetrics(lat, lng, h.lat, h.lng);
-      const community = computeCommunityScore(h.id, allReviews);
-      return {
-        ...h,
-        /** Driving road distance (km) — used consistently across map, cards, detail, compare & emergency */
-        distanceKm: travel.roadKm,
-        straightKm: travel.straightKm,
-        roadKm: travel.roadKm,
-        etaMinutes: travel.trafficMinutes,
-        baseMinutes: travel.baseMinutes,
-        trafficLevel: travel.trafficLevel,
-        trafficSource: travel.source,
-        communityScore: community.weightedStarScore,
-        imdbScore: community.imdbScaleScore,
-        reviewCount: community.eligibleCount,
-      };
-    });
-
-    if (type && type !== 'all') results = results.filter((h) => h.type === type);
-    if (speciality) results = results.filter((h) => h.specialities.includes(speciality));
-    if (emergencyOnly) results = results.filter((h) => h.emergency === 'verified' || h.emergency === 'unverified');
+    // ── 1. Filter the dataset first (cheap) so we only route to what we show ──
+    let filtered = [...HOSPITALS];
+    if (type && type !== 'all') filtered = filtered.filter((h) => h.type === type);
+    if (speciality) filtered = filtered.filter((h) => h.specialities.includes(speciality));
+    if (emergencyOnly) {
+      filtered = filtered.filter((h) => h.emergency === 'verified' || h.emergency === 'unverified');
+    }
     if (q) {
-      results = results.filter((h) =>
+      filtered = filtered.filter((h) =>
         [
           h.name,
           h.shortName,
@@ -65,7 +82,9 @@ export function GET(request: NextRequest) {
           STATE_HI[h.state] ?? '',
           h.address,
           h.pincode ?? '',
-          h.type === 'government' ? 'सरकारी সরকারি ప్రభుత్వ सरकारी அரசு સરકારી سرکاری ಸರ್ಕಾರಿ ସରକାରୀ സർക്കാർ' : 'निजी বেসরকারি ప్రైవేట్ खाजगी தனியார் ખાનગી نجی ಖಾಸಗಿ ବେସରକାରୀ സ്വകാര്യം',
+          h.type === 'government'
+            ? 'सरकारी সরকারি ప్రభుత్వ सरकारी அரசு સરકારી سرکاری ಸರ್ಕಾರಿ ସରକାରୀ സർക്കാർ'
+            : 'निजी বেসরকারি ప్రైవేట్ खाजगी தனியார் ખાનગી نجی ಖಾಸಗಿ ବେସରକାରୀ സ്വകാര്യം',
           ...h.specialities,
           ...h.specialities.map((s) => SPECIALITY_HI[s] ?? ''),
           ...h.facilities,
@@ -77,20 +96,57 @@ export function GET(request: NextRequest) {
       );
     }
 
-    const withinRadius = results.filter((h) => h.distanceKm <= radius);
-    const fellBack = withinRadius.length === 0 && results.length > 0;
-    const finalList = fellBack ? results : withinRadius;
+    // ── 2. One authoritative travel snapshot for the whole result set ─────────
+    const snapshot = await cached(
+      travelCacheKey(['hospitals', lat, lng, filtered.map((h) => h.id).join('+')]),
+      CACHE_TTL_MS,
+      () => getTravelSnapshot({ origin: { lat, lng }, originSource, hospitals: filtered, language: 'en-IN' }),
+    );
+
+    const results = filtered.map((h) => {
+      const leg = snapshot.legs[h.id];
+      const geo = resolveHospitalGeo(h);
+      const community = computeCommunityScore(h.id, allReviews);
+      return {
+        ...h,
+        lat: geo.lat,
+        lng: geo.lng,
+        address: geo.address,
+        /** Driving road distance in km from Google Routes (null = unknown, never guessed). */
+        distanceKm: leg?.distanceKm ?? null,
+        roadKm: leg?.distanceKm ?? null,
+        distanceMeters: leg?.distanceMeters ?? null,
+        /** Direct-line measurement, explicitly separate from the road distance. */
+        straightKm: leg?.straightKm ?? null,
+        etaMinutes: leg?.etaMinutes ?? null,
+        staticMinutes: leg?.staticMinutes ?? null,
+        trafficImpactMinutes: leg?.trafficImpactMinutes ?? null,
+        travelSource: leg?.source ?? 'unavailable',
+        travelError: leg?.error ?? null,
+        distanceComputedAt: leg?.computedAt ?? null,
+        communityScore: community.weightedStarScore,
+        imdbScore: community.imdbScaleScore,
+        reviewCount: community.eligibleCount,
+      };
+    });
+
+    const known = results.filter((h) => typeof h.distanceKm === 'number');
+    const withinRadius = results.filter((h) => typeof h.distanceKm === 'number' && (h.distanceKm as number) <= radius);
+    const fellBack = known.length > 0 && withinRadius.length === 0;
+    const finalList = fellBack ? known : withinRadius.length > 0 ? withinRadius : results;
 
     finalList.sort((a, b) => {
       if (sort === 'name') return a.shortName.localeCompare(b.shortName);
-      if (sort === 'type') return a.type.localeCompare(b.type) || a.distanceKm - b.distanceKm;
+      if (sort === 'type') {
+        return a.type.localeCompare(b.type) || (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity);
+      }
       if (sort === 'rating') {
         const ra = a.communityScore ?? 0;
         const rb = b.communityScore ?? 0;
         if (rb !== ra) return rb - ra;
-        return a.distanceKm - b.distanceKm;
+        return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity);
       }
-      return a.distanceKm - b.distanceKm;
+      return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity);
     });
 
     const fellBackNote =
@@ -105,6 +161,13 @@ export function GET(request: NextRequest) {
       fellBack,
       note: fellBack ? fellBackNote : undefined,
       results: finalList,
+      /** Provenance for every distance in this response. */
+      distanceSource: snapshot.source,
+      distanceDisclosure: snapshot.disclosure,
+      travelComputedAt: snapshot.computedAt,
+      requestId: snapshot.requestId,
+      origin: { lat, lng, source: originSource },
+      blockers: snapshot.blockers,
     });
   } catch (err) {
     console.error('[api/hospitals]', err);

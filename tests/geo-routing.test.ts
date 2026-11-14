@@ -1,18 +1,26 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { searchIndianLocalities } from '@/data/localities';
 import {
   haversineKm,
-  estimateRoadDistanceKm,
-  estimateTravelMetrics,
-  formatDistance,
+  formatDrivingKm,
+  formatStraightLineKm,
   formatDuration,
   directionsUrl,
   directionsFromToUrl,
 } from '@/lib/geo';
-import { searchIndianLocalities } from '@/data/localities';
-import { calculateRoute } from '@/lib/routing';
+import { isInsideBounds } from '@/data/hospital-locations';
 
-describe('Module 1, 2 & 3 — Geocoding, Distance Consistency & Traffic-Aware Routing', () => {
-  it('geocodes Pusa Road, New Delhi accurately in offline gazetteer', () => {
+/**
+ * Loop A — geocoding & distance formatting primitives.
+ *
+ * Everything that used to live here as a *model* (tortuosity factors, "urban
+ * speed" assumptions, synthetic corridors) has been deleted from the product:
+ * driving distance now comes only from the Google Routes API. What remains to
+ * test is the gazetteer and the display formatters.
+ */
+
+describe('Loop A — offline gazetteer geocoding', () => {
+  it('geocodes Pusa Road, New Delhi accurately', () => {
     const matches = searchIndianLocalities('Pusa Road, New Delhi');
     expect(matches.length).toBeGreaterThan(0);
     expect(matches[0].id).toBe('pusa-road-delhi');
@@ -21,59 +29,105 @@ describe('Module 1, 2 & 3 — Geocoding, Distance Consistency & Traffic-Aware Ro
   });
 
   it('supports pincode and multilingual locality queries', () => {
-    const byPin = searchIndianLocalities('110029');
-    expect(byPin[0]?.id).toBe('ansari-nagar-delhi');
-
-    const byTamil = searchIndianLocalities('சென்னை');
-    expect(byTamil[0]?.city).toBe('Chennai');
-
-    const byBengali = searchIndianLocalities('কলকাতা');
-    expect(byBengali[0]?.city).toBe('Kolkata');
+    expect(searchIndianLocalities('110029')[0]?.id).toBe('ansari-nagar-delhi');
+    expect(searchIndianLocalities('சென்னை')[0]?.city).toBe('Chennai');
+    expect(searchIndianLocalities('কলকাতা')[0]?.city).toBe('Kolkata');
+    expect(searchIndianLocalities('मुंबई')[0]?.city).toBe('Mumbai');
   });
 
-  it('computes consistent road distance >= straight-line Haversine distance', () => {
+  it('returns nothing rather than guessing for unknown input', () => {
+    expect(searchIndianLocalities('zzzzqqq')).toHaveLength(0);
+  });
+
+  it('every gazetteer entry is inside India', () => {
+    for (const locality of searchIndianLocalities('a')) {
+      expect(isInsideBounds(locality.lat, locality.lng, locality.city)).toBe(true);
+    }
+  });
+});
+
+describe('Loop A — display formatters (the only place km are produced)', () => {
+  it('formats driving km to one decimal', () => {
+    expect(formatDrivingKm(16.84)).toBe('16.8 km');
+    expect(formatDrivingKm(4.3)).toBe('4.3 km');
+  });
+
+  it('formats sub-kilometre distances in metres', () => {
+    expect(formatDrivingKm(0.72)).toBe('720 m');
+    expect(formatStraightLineKm(0.41)).toBe('410 m (straight line)');
+  });
+
+  it('never fabricates a value for unknown distances', () => {
+    expect(formatDrivingKm(null)).toBeNull();
+    expect(formatStraightLineKm(null)).toBeNull();
+    expect(formatDrivingKm(Number.NaN)).toBeNull();
+    expect(formatDrivingKm(Infinity)).toBeNull();
+  });
+
+  it('formats durations from minutes', () => {
+    expect(formatDuration(51)).toBe('51 min');
+    expect(formatDuration(75)).toMatch(/1 h|1 hr|1h/);
+  });
+
+  it('keeps straight-line and driving distance in separate formatters', () => {
+    expect(formatStraightLineKm(16.84)).toBe('16.8 km (straight line)');
+    expect(formatStraightLineKm(16.84)).not.toBe(formatDrivingKm(16.84));
+  });
+
+  it('computes haversine only for straight-line geometry', () => {
     const pusa = { lat: 28.6426, lng: 77.1842 };
-    const blk = { lat: 28.6368, lng: 77.1682 };
-    const straight = haversineKm(pusa.lat, pusa.lng, blk.lat, blk.lng);
-    const road = estimateRoadDistanceKm(pusa.lat, pusa.lng, blk.lat, blk.lng);
-    expect(road).toBeGreaterThan(straight);
-    expect(road).toBeLessThan(straight * 1.5);
+    const bsa = { lat: 28.7151, lng: 77.1149 };
+    const straight = haversineKm(pusa.lat, pusa.lng, bsa.lat, bsa.lng);
+    // Sanity band only — this value is never displayed as a road distance.
+    expect(straight).toBeGreaterThan(7);
+    expect(straight).toBeLessThan(12);
   });
+});
 
-  it('models peak vs off-peak traffic ETAs deterministically and labels source honestly', () => {
-    const origin = { lat: 28.6426, lng: 77.1842 };
-    const aiims = { lat: 28.5672, lng: 77.2100 };
-
-    const peak = estimateTravelMetrics(origin.lat, origin.lng, aiims.lat, aiims.lng, 9); // 9 AM IST peak
-    const night = estimateTravelMetrics(origin.lat, origin.lng, aiims.lat, aiims.lng, 2); // 2 AM IST off-peak
-
-    expect(peak.roadKm).toBe(night.roadKm);
-    expect(peak.trafficLevel).toBe('heavy');
-    expect(night.trafficLevel).toBe('low');
-    expect(peak.trafficMinutes).toBeGreaterThan(night.trafficMinutes);
-    expect(peak.source).toBe('estimated-urban-model');
-  });
-
-  it('includes origin coordinates in Google Maps directions URLs', () => {
-    const url = directionsUrl(28.5672, 77.21, 'AIIMS', { lat: 28.6426, lng: 77.1842 });
-    expect(url).toBe(directionsFromToUrl(28.6426, 77.1842, 28.5672, 77.21, 'AIIMS'));
+describe('Loop A — Google Maps links', () => {
+  it('builds an origin→destination navigation URL', () => {
+    const url = directionsFromToUrl(28.6426, 77.1842, 28.7151, 77.1149, 'BSA Hospital');
     expect(url).toContain('origin=28.6426,77.1842');
-    expect(url).toContain('destination=28.5672,77.21');
+    expect(decodeURIComponent(url)).toContain('destination=28.7151,77.1149 (BSA Hospital)');
+    expect(url).toContain('travelmode=driving');
   });
 
-  it('formats distances and durations across Indian languages', () => {
-    expect(formatDistance(4.25, 'en')).toBe('4.3 km');
-    expect(formatDistance(4.25, 'ta')).toContain('கி.மீ');
-    expect(formatDistance(4.25, 'bn')).toContain('কিমি');
-    expect(formatDistance(4.25, 'ur')).toContain('کلومیٹر');
-    expect(formatDuration(75, 'hi')).toContain('घंटा');
+  it('omits the origin when no starting point is known (never defaults to Delhi)', () => {
+    const url = directionsUrl(28.7151, 77.1149, 'BSA Hospital', null);
+    expect(url).not.toContain('origin=');
+    expect(url).toContain('/maps/search/');
+    expect(decodeURIComponent(url)).toContain('28.7151,77.1149 (BSA Hospital)');
+  });
+});
+
+describe('Legacy modelling code is gone, not merely unused', () => {
+  beforeAll(() => {
+    vi.stubEnv('GOOGLE_MAPS_API_KEY', '');
+  });
+  afterAll(() => {
+    vi.unstubAllEnvs();
   });
 
-  it('calculates route with geometry and honest traffic disclosure', async () => {
-    const route = await calculateRoute(28.6426, 77.1842, 28.5672, 77.2100);
-    expect(route.roadKm).toBeGreaterThan(0);
-    expect(route.trafficMinutes).toBeGreaterThanOrEqual(route.baseMinutes);
-    expect(route.geometry.length).toBeGreaterThanOrEqual(2);
-    expect(route.trafficDisclosure.length).toBeGreaterThan(10);
+  it('lib/geo no longer exports an estimated-urban-model distance function', async () => {
+    const geo = await import('@/lib/geo');
+    expect('estimateRoadDistanceKm' in geo).toBe(false);
+    expect('estimateTravelMetrics' in geo).toBe(false);
+  });
+
+  it('lib/routing no longer synthesizes corridors for the app', async () => {
+    const routing = await import('@/lib/routing');
+    expect(routing).toBeDefined();
+    // /api/route serves Google data; the synthetic fallback must not be reachable.
+    const apiRoute = await import('@/app/api/route/route');
+    const res = await apiRoute.GET(
+      new (await import('next/server')).NextRequest(
+        'http://localhost:3000/api/route?fromLat=28.6426&fromLng=77.1842&hospitalId=bsa-hospital',
+      ),
+    );
+    const data = await res.json();
+    // With no key: honest "unavailable" and NO distance number.
+    expect(data.source).toBe('unavailable');
+    expect(data.distanceKm).toBeNull();
+    expect(data.geometry ?? []).toHaveLength(0);
   });
 });

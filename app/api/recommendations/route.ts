@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { HOSPITALS, ALL_SPECIALITIES } from '@/data/hospitals';
 import { recommendHospitals, specialityForProblem } from '@/lib/recommend';
 import { isValidLang } from '@/lib/lang-meta';
+import { getTravelSnapshot } from '@/lib/travel';
+import { cached, travelCacheKey } from '@/lib/travel-cache';
 
 export const dynamic = 'force-dynamic';
 
-export function GET(request: NextRequest) {
+const CACHE_TTL_MS = 60_000;
+
+export async function GET(request: NextRequest) {
   try {
     const sp = request.nextUrl.searchParams;
     const langRaw = sp.get('lang') ?? 'en';
@@ -30,31 +34,72 @@ export function GET(request: NextRequest) {
     const typePreference = (sp.get('type') ?? 'any') as 'any' | 'government' | 'private';
     const budget = (sp.get('budget') ?? 'any') as 'any' | 'low' | 'medium' | 'high';
     const facilitiesWanted = (sp.get('facilities') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
-    const lat = parseFloat(sp.get('lat') ?? '28.6139');
-    const lng = parseFloat(sp.get('lng') ?? '77.2090');
-    if (Number.isNaN(lat) || Number.isNaN(lng)) {
-      return NextResponse.json({ error: 'Invalid location coordinates' }, { status: 400 });
-    }
+    const lat = parseFloat(sp.get('lat') ?? '');
+    const lng = parseFloat(sp.get('lng') ?? '');
 
-    const results = recommendHospitals(HOSPITALS, {
+    const base = recommendHospitals(HOSPITALS, {
       speciality,
       typePreference,
       budget,
       facilitiesWanted,
-      lat,
-      lng,
+      lat: Number.isFinite(lat) ? lat : null,
+      lng: Number.isFinite(lng) ? lng : null,
       lang,
     });
+
+    // Authoritative driving distances for the recommended set only.
+    let results = base;
+    let distanceSource = 'unavailable';
+    let distanceDisclosure = {
+      text: 'Share your location to see verified Google driving distances for these recommendations.',
+      live: false,
+    };
+    let blockers: string[] = [];
+
+    if (Number.isFinite(lat) && Number.isFinite(lng) && base.length > 0) {
+      const snapshot = await cached(
+        travelCacheKey(['reco', lat, lng, base.map((r) => r.hospital.id).join('+')]),
+        CACHE_TTL_MS,
+        () =>
+          getTravelSnapshot({ origin: { lat, lng }, hospitals: base.map((r) => r.hospital), language: 'en-IN' }),
+      );
+      distanceSource = snapshot.source;
+      distanceDisclosure = snapshot.disclosure;
+      blockers = snapshot.blockers;
+      results = base
+        .map((r) => {
+          const leg = snapshot.legs[r.hospital.id];
+          return {
+            ...r,
+            distanceKm: leg?.distanceKm ?? null,
+            roadKm: leg?.distanceKm ?? null,
+            etaMinutes: leg?.etaMinutes ?? null,
+            travelSource: leg?.source ?? 'unavailable',
+          };
+        })
+        .sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity));
+    } else {
+      results = base.map((r) => ({
+        ...r,
+        distanceKm: null,
+        roadKm: null,
+        etaMinutes: null,
+        travelSource: 'unavailable',
+      }));
+    }
 
     return NextResponse.json({
       speciality,
       mappedFromProblem: problem ? speciality : undefined,
       count: results.length,
       results,
+      distanceSource,
+      distanceDisclosure,
+      blockers,
       disclaimer:
         lang === 'hi'
-          ? 'सुझाव सूचीबद्ध सुविधाओं, अनुमानित दूरी और किफ़ायती संकेतों पर आधारित हैं — ये चिकित्सा सलाह या इलाज की गारंटी नहीं हैं। जाने से पहले फ़ोन पर पुष्टि ज़रूर करें।'
-          : 'Recommendations are based on listed facilities, approximate distance and affordability signals — they are NOT medical advice or a guarantee of care. Always confirm services by phone before travel.',
+          ? 'सुझाव सूचीबद्ध सुविधाओं, Google सड़क दूरी और किफ़ायती संकेतों पर आधारित हैं — ये चिकित्सा सलाह या इलाज की गारंटी नहीं हैं। जाने से पहले फ़ोन पर पुष्टि ज़रूर करें।'
+          : 'Recommendations are based on listed facilities, verified Google driving distance and affordability signals — they are NOT medical advice or a guarantee of care. Always confirm services by phone before travel.',
     });
   } catch (err) {
     console.error('[api/recommendations]', err);

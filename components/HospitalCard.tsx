@@ -5,7 +5,13 @@ import {
   Check, Siren, Clock, Star, Bookmark, Route,
 } from 'lucide-react';
 import { Hospital } from '@/data/types';
-import { formatDistance, formatDuration, directionsUrl, TrafficLevel } from '@/lib/geo';
+import {
+  formatDrivingKm as formatDriving,
+  formatDuration,
+  directionsUrl,
+  formatStraightLineKm,
+} from '@/lib/geo';
+import { distanceStrings } from '@/lib/ui-strings';
 import { useCompare } from '@/lib/compare';
 import { useSavedHospitals } from '@/lib/saved';
 import { useUserLocation } from '@/lib/useLocation';
@@ -13,10 +19,16 @@ import { useLang, DictKey } from '@/lib/i18n';
 import { tSpeciality } from '@/lib/i18n-data';
 
 export type EnrichedHospital = Hospital & {
+  /** Google Routes driving distance in km. null = unknown (never guessed). */
   distanceKm?: number | null;
   roadKm?: number | null;
+  /** Direct-line distance, shown only with its own explicit label. */
+  straightKm?: number | null;
   etaMinutes?: number | null;
-  trafficLevel?: TrafficLevel;
+  trafficImpactMinutes?: number | null;
+  travelSource?: string;
+  travelError?: string | null;
+  distanceComputedAt?: string | null;
   communityScore?: number | null;
   imdbScore?: number | null;
   reviewCount?: number;
@@ -25,7 +37,7 @@ export type EnrichedHospital = Hospital & {
 interface Props {
   hospital: EnrichedHospital;
   showDistance?: boolean;
-  /** 1-based marker index matching the numbered pin on MapView */
+  /** 1-based marker index matching the numbered pin on the Google map */
   markerIndex?: number;
   selected?: boolean;
   onSelect?: (hospitalId: string) => void;
@@ -51,14 +63,23 @@ export default function HospitalCard({
   const { isSaved, toggleSaved } = useSavedHospitals();
   const inCompare = has(hospital.id);
   const saved = isSaved(hospital.id);
+  const ds = distanceStrings(lang);
+  /**
+   * Single rule for every card in the product: the big number is the Google
+   * driving distance, or an explicit "unavailable" state. A straight-line value
+   * is only ever shown underneath, with its own separate label.
+   */
   const dist = hospital.roadKm ?? hospital.distanceKm ?? null;
+  const drivingLabel = formatDriving(dist, lang);
+  const straightLabel = formatStraightLineKm(hospital.straightKm ?? null, lang);
   const eta = hospital.etaMinutes ?? null;
+  const trafficImpact = hospital.trafficImpactMinutes ?? null;
   const isGovt = hospital.type === 'government';
 
   const trafficColor =
-    hospital.trafficLevel === 'heavy'
+    trafficImpact !== null && trafficImpact >= 10
       ? 'text-amber-800 bg-amber-50 border-amber-200'
-      : hospital.trafficLevel === 'low'
+      : trafficImpact === 0
         ? 'text-emerald-800 bg-emerald-50 border-emerald-200'
         : 'text-slate-700 bg-slate-100 border-slate-200';
 
@@ -138,19 +159,37 @@ export default function HospitalCard({
           </div>
         </div>
 
-        {showDistance && dist !== null && (
-          <div className="text-right shrink-0">
-            <p className="text-lg font-extrabold text-brand-800 leading-none" data-testid="card-distance">
-              {formatDistance(dist, lang)}
+        {showDistance && (
+          <div className="text-right shrink-0" data-testid="card-distance-block">
+            {drivingLabel ? (
+              <p className="text-lg font-extrabold text-brand-800 leading-none" data-testid="card-distance">
+                {drivingLabel}
+              </p>
+            ) : (
+              <p
+                className="text-[11px] font-bold text-amber-800 leading-tight max-w-[92px]"
+                data-testid="card-distance-unavailable"
+                title={ds.distanceUnavailableWhy}
+              >
+                {ds.distanceUnavailable}
+              </p>
+            )}
+            <p className="text-[10px] uppercase tracking-wide text-slate-500 mt-1">
+              {drivingLabel ? ds.drivingDistance : '—'}
             </p>
-            <p className="text-[10px] uppercase tracking-wide text-slate-500 mt-1">{t('roadDistLabel')}</p>
             {eta !== null && (
               <span
                 className={`mt-1.5 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold ${trafficColor}`}
                 data-testid="card-eta"
+                title={trafficImpact !== null ? `${ds.trafficImpact}: +${trafficImpact} min` : undefined}
               >
                 <Clock size={11} /> ~{formatDuration(eta, lang)}
               </span>
+            )}
+            {drivingLabel && straightLabel && (
+              <p className="mt-1 text-[9px] text-slate-400 leading-tight" data-testid="card-straight">
+                {ds.straightLine}: {straightLabel}
+              </p>
             )}
           </div>
         )}
@@ -193,10 +232,14 @@ export default function HospitalCard({
         )}
 
         <a
-          href={directionsUrl(hospital.lat, hospital.lng, hospital.shortName, {
-            lat: location.lat,
-            lng: location.lng,
-          })}
+          href={directionsUrl(
+            hospital.lat,
+            hospital.lng,
+            hospital.shortName,
+            typeof location.lat === 'number' && typeof location.lng === 'number'
+              ? { lat: location.lat, lng: location.lng }
+              : null,
+          )}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 rounded-xl border-2 border-brand-700 text-brand-800 px-3 py-2.5 text-sm font-bold hover:bg-brand-50 min-h-[44px]"

@@ -35,6 +35,10 @@ export interface Hospital {
   facilities: string[];
   /** Approximate relative spending profile used for affordability hints — never an exact quote. */
   costProfile: 'very-low' | 'low' | 'moderate' | 'high';
+  /** Coordinate provenance — drives the accuracy disclosure shown in the UI. */
+  geoConfidence?: 'verified' | 'approximate';
+  /** Real Google Place ID when known; null otherwise (never fabricated). */
+  placeId?: string | null;
   ownershipNote?: string;
   foundedNote?: string;
   dataNote?: string;

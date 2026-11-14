@@ -1,5 +1,5 @@
 import { Hospital } from '@/data/types';
-import { estimateTravelMetrics } from './geo';
+import { haversineKm } from './geo';
 import { tFacility, tSpeciality } from './i18n-data';
 import type { Lang } from './lang-meta';
 
@@ -10,16 +10,20 @@ export interface RecommendInput {
   /** 'any' | 'low' | 'medium' | 'high' — rough budget band for the episode of care */
   budget: 'any' | 'low' | 'medium' | 'high';
   facilitiesWanted: string[];
-  lat: number;
-  lng: number;
+  /** null when the user has not shared a location — distances are then unknown. */
+  lat: number | null;
+  lng: number | null;
   lang?: Lang;
 }
 
 export interface RecommendationResult {
   hospital: Hospital;
-  distanceKm: number;
-  roadKm: number;
-  etaMinutes: number;
+  /** Populated from Google Routes by the API route; null when unknown. */
+  distanceKm: number | null;
+  roadKm: number | null;
+  etaMinutes: number | null;
+  /** Direct-line distance used ONLY for internal proximity scoring. */
+  straightKm: number | null;
   score: number;
   reasons: string[];
   cautions: string[];
@@ -58,28 +62,35 @@ export function recommendHospitals(all: Hospital[], input: RecommendInput): Reco
       continue;
     }
 
-    const travel = estimateTravelMetrics(input.lat, input.lng, h.lat, h.lng);
-    const distanceKm = travel.roadKm;
-    const roadKm = travel.roadKm;
-    const etaMinutes = travel.trafficMinutes;
+    /**
+     * Proximity scoring uses the straight-line measurement ONLY as an internal
+     * ranking signal. The user-facing driving distance is attached later from
+     * Google Routes (`/api/recommendations`), so a modelled number can never
+     * leak into the UI.
+     */
+    const straightKm =
+      input.lat !== null && input.lng !== null && Number.isFinite(input.lat) && Number.isFinite(input.lng)
+        ? Number(haversineKm(input.lat, input.lng, h.lat, h.lng).toFixed(2))
+        : null;
 
-    // 2. Distance (graduated, not dominant).
-    if (distanceKm <= 5) {
+    // 2. Proximity (graduated, not dominant).
+    if (straightKm === null) {
+      score += 8; // neutral when location unknown
+    } else if (straightKm <= 5) {
       score += 25;
-      reasons.push(hi ? `केवल ${distanceKm.toFixed(1)} किमी दूर — पहुंचना बहुत आसान` : `Only ${distanceKm.toFixed(1)} km away — very accessible`);
-    } else if (distanceKm <= 15) {
+      reasons.push(hi ? 'आपके बहुत पास — पहुंचना आसान' : 'Very close to you — easy to reach');
+    } else if (straightKm <= 15) {
       score += 20;
-      reasons.push(hi ? `${distanceKm.toFixed(1)} किमी दूर — अपेक्षाकृत नज़दीक` : `${distanceKm.toFixed(1)} km away — reasonably close`);
-    } else if (distanceKm <= 30) {
+      reasons.push(hi ? 'अपेक्षाकृत नज़दीक' : 'Reasonably close to you');
+    } else if (straightKm <= 30) {
       score += 12;
-      reasons.push(hi ? `${distanceKm.toFixed(1)} किमी दूर` : `${distanceKm.toFixed(1)} km away`);
-    } else if (distanceKm <= 75) {
+    } else if (straightKm <= 75) {
       score += 5;
     } else {
       cautions.push(
         hi
-          ? `आपसे काफ़ी दूर (${Math.round(distanceKm)} किमी) — जब तक यह विशेषता पास में न मिले, नज़दीकी विकल्प भी देखें`
-          : `Far from you (${Math.round(distanceKm)} km) — consider nearer options unless the speciality is unavailable locally`,
+          ? 'आपसे काफ़ी दूर — जब तक यह विशेषता पास में न मिले, नज़दीकी विकल्प भी देखें'
+          : 'Far from you — consider nearer options unless the speciality is unavailable locally',
       );
     }
 
@@ -154,7 +165,16 @@ export function recommendHospitals(all: Hospital[], input: RecommendInput): Reco
       score += 3;
     }
 
-    results.push({ hospital: h, distanceKm, roadKm, etaMinutes, score, reasons, cautions });
+    results.push({
+      hospital: h,
+      distanceKm: null,
+      roadKm: null,
+      etaMinutes: null,
+      straightKm,
+      score,
+      reasons,
+      cautions,
+    });
   }
 
   return results.sort((a, b) => b.score - a.score).slice(0, 6);
