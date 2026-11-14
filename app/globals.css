@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  @apply bg-cream text-ink antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Accessible focus ring everywhere */
+:focus-visible {
+  outline: 3px solid #1f7453;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-colors focus-visible:outline-none disabled:opacity-60 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn bg-brand-700 text-white hover:bg-brand-800 px-5 py-3 text-base min-h-[48px]; }
+  .btn-secondary { @apply btn bg-white text-brand-800 border-2 border-brand-700 hover:bg-brand-50 px-5 py-3 text-base min-h-[48px]; }
+  .btn-danger { @apply btn bg-red-700 text-white hover:bg-red-800 px-5 py-3 text-base min-h-[48px]; }
+  .btn-ghost { @apply btn text-brand-800 hover:bg-brand-50 px-4 py-2.5 min-h-[44px]; }
+  .card { @apply bg-white rounded-2xl border border-brand-100 shadow-card; }
+  .input { @apply w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base min-h-[48px] placeholder:text-slate-400 focus:border-brand-600 focus:ring-2 focus:ring-brand-200 focus:outline-none; }
+  .chip { @apply inline-flex items-center gap-1.5 rounded-full bg-brand-50 text-brand-800 border border-brand-200 px-3 py-1 text-xs font-medium; }
+  .chip-grey { @apply inline-flex items-center gap-1.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 px-3 py-1 text-xs font-medium; }
+  .chip-red { @apply inline-flex items-center gap-1.5 rounded-full bg-red-50 text-red-800 border border-red-200 px-3 py-1 text-xs font-semibold; }
+  .chip-amber { @apply inline-flex items-center gap-1.5 rounded-full bg-amber-50 text-amber-900 border border-amber-200 px-3 py-1 text-xs font-medium; }
+  .section-title { @apply text-2xl sm:text-3xl font-extrabold tracking-tight text-brand-900; }
+  .section-sub { @apply text-slate-600 mt-2 max-w-2xl; }
+  .label { @apply block text-sm font-semibold text-slate-700 mb-1.5; }
+}
+
+/* Leaflet map container */
+.leaflet-container { border-radius: 1rem; z-index: 0; font-family: inherit; }
+.leaflet-popup-content-wrapper { border-radius: 0.75rem; }
+.js-map-marker { background: transparent; border: none; }
+
+/* Comparison table print styles */
+@media print {
+  header, footer, nav, .print-hidden, .leaflet-container { display: none !important; }
+  body { background: #fff; }
+  .card { box-shadow: none; border: 1px solid #cbd5e1; }
+  .print-only { display: block !important; }
+}
+.print-only { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
