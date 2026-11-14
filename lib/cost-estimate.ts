@@ -1,4 +1,5 @@
 import { Treatment } from '@/data/types';
+import { tTreatmentTest } from './i18n-data';
 
 export type RoomType = 'general' | 'semi-private' | 'private' | 'icu';
 export const ROOM_MULTIPLIER: Record<RoomType, number> = {
@@ -11,6 +12,12 @@ export const ROOM_LABEL: Record<RoomType, string> = {
   general: 'General ward',
   'semi-private': 'Semi-private room',
   private: 'Private room',
+  icu: 'ICU',
+};
+export const ROOM_LABEL_HI: Record<RoomType, string> = {
+  general: 'जनरल वार्ड',
+  'semi-private': 'सेमी-प्राइवेट कमरा',
+  private: 'प्राइवेट कमरा',
   icu: 'ICU',
 };
 
@@ -41,32 +48,45 @@ export interface EstimateResult {
 export const ESTIMATE_DISCLAIMER =
   'These are indicative ranges from public references, not a quotation. Actual bills depend on the city, hospital, room type, complications and length of stay. Government hospitals are often far cheaper — some services (e.g., deliveries under JSY, dialysis under PMNDP, cataract surgery) are free for eligible patients. Always ask the hospital for a written estimate.';
 
-export function estimateTreatment(treatment: Treatment, input: EstimateInput): EstimateResult {
+export const ESTIMATE_DISCLAIMER_HI =
+  'ये सार्वजनिक संदर्भों पर आधारित अनुमानित सीमाएं हैं, कोई पक्का कोटेशन नहीं। वास्तविक बिल शहर, अस्पताल, कमरे की श्रेणी, जटिलताओं और भर्ती रहने के दिनों पर निर्भर करता है। सरकारी अस्पताल अक्सर बहुत सस्ते होते हैं — कुछ सेवाएं (जैसे JSY के तहत प्रसव, PMNDP के तहत डायलिसिस, मोतियाबिंद सर्जरी) पात्र मरीजों के लिए मुफ़्त हैं। अस्पताल से हमेशा लिखित अनुमान मांगें।';
+
+export function estimateTreatment(
+  treatment: Treatment,
+  input: EstimateInput,
+  lang: 'en' | 'hi' = 'en',
+): EstimateResult {
   const lines: EstimateLine[] = [];
   const unavailable: string[] = [];
+  const hi = lang === 'hi';
 
   lines.push({
-    label: 'Consultation / registration',
+    label: hi ? 'परामर्श / पंजीकरण' : 'Consultation / registration',
     govt: treatment.consultation.govt,
     private: treatment.consultation.private,
   });
 
   treatment.tests.forEach((test, i) => {
     if (input.includedTests.includes(i)) {
-      lines.push({ label: test.name, govt: test.govt, private: test.private });
+      lines.push({
+        label: tTreatmentTest(test.name, lang),
+        govt: test.govt,
+        private: test.private,
+      });
     }
   });
 
+  const procLabel = hi ? 'प्रक्रिया / सर्जरी शुल्क' : 'Procedure / surgery charges';
   if (treatment.procedure) {
     lines.push({
-      label: 'Procedure / surgery charges',
+      label: procLabel,
       govt: treatment.procedure.govt,
       private: treatment.procedure.private,
     });
   } else {
-    unavailable.push('Procedure / surgery charges');
+    unavailable.push(procLabel);
     lines.push({
-      label: 'Procedure / surgery charges',
+      label: procLabel,
       govt: [0, 0],
       private: [0, 0],
       unavailable: true,
@@ -78,27 +98,31 @@ export function estimateTreatment(treatment: Treatment, input: EstimateInput): E
     const days = Math.max(0, input.stayDays);
     const [gLo, gHi] = treatment.roomPerDay.govt;
     const [pLo, pHi] = treatment.roomPerDay.private;
+    const roomLabel = hi ? ROOM_LABEL_HI[input.roomType] : ROOM_LABEL[input.roomType];
+    const roomLine = hi
+      ? `कमरा शुल्क (${days} ${days === 1 ? 'रात' : 'रातें'}, ${roomLabel})`
+      : `Room charges (${days} night${days === 1 ? '' : 's'}, ${roomLabel})`;
     lines.push({
-      label: `Room charges (${days} night${days === 1 ? '' : 's'}, ${ROOM_LABEL[input.roomType]})`,
+      label: roomLine,
       govt: [gLo * mult * days, gHi * mult * days],
       private: [pLo * mult * days, pHi * mult * days],
     });
   }
 
   lines.push({
-    label: 'Medicines',
+    label: hi ? 'दवाइयां' : 'Medicines',
     govt: treatment.medicines.govt,
     private: treatment.medicines.private,
   });
 
   const sum = (sel: 'govt' | 'private'): [number, number] => {
-    let lo = 0, hi = 0;
+    let lo = 0, hiVal = 0;
     for (const l of lines) {
       if (l.unavailable) continue;
       lo += l[sel][0];
-      hi += l[sel][1];
+      hiVal += l[sel][1];
     }
-    return [Math.round(lo), Math.round(hi)];
+    return [Math.round(lo), Math.round(hiVal)];
   };
 
   return {
@@ -107,6 +131,6 @@ export function estimateTreatment(treatment: Treatment, input: EstimateInput): E
     govtTotal: sum('govt'),
     privateTotal: sum('private'),
     unavailableComponents: unavailable,
-    disclaimer: ESTIMATE_DISCLAIMER,
+    disclaimer: hi ? ESTIMATE_DISCLAIMER_HI : ESTIMATE_DISCLAIMER,
   };
 }

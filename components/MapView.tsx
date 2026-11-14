@@ -4,6 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Hospital } from '@/data/types';
 import { formatDistance } from '@/lib/geo';
+import { useLang } from '@/lib/i18n';
 
 export type MapHospital = Hospital & { distanceKm?: number | null };
 
@@ -33,6 +34,7 @@ function markerIcon(label: string, kind: 'govt' | 'private' | 'user'): L.DivIcon
 }
 
 export default function MapView({ hospitals, center, zoom = 11, className = '', userLocation = null }: Props) {
+  const { t, lang } = useLang();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const layerRef = useRef<L.LayerGroup | null>(null);
@@ -64,7 +66,7 @@ export default function MapView({ hospitals, center, zoom = 11, className = '', 
     map.setView([center.lat, center.lng], zoom, { animate: false });
   }, [center.lat, center.lng, zoom]);
 
-  // Redraw markers when the hospital set changes
+  // Redraw markers when the hospital set or language changes
   useEffect(() => {
     const layer = layerRef.current;
     const map = mapRef.current;
@@ -74,26 +76,30 @@ export default function MapView({ hospitals, center, zoom = 11, className = '', 
     hospitals.slice(0, 60).forEach((h, i) => {
       const icon = markerIcon(String(i + 1), h.type === 'government' ? 'govt' : 'private');
       const marker = L.marker([h.lat, h.lng], { icon, title: h.shortName });
-      const dist = typeof h.distanceKm === 'number' ? `<div style="font-size:12px;color:#475569;margin-top:2px">${formatDistance(h.distanceKm)} away</div>` : '';
+      const dist = typeof h.distanceKm === 'number'
+        ? `<div style="font-size:12px;color:#475569;margin-top:2px">${formatDistance(h.distanceKm, lang)} ${escapeHtml(t('away'))}</div>`
+        : '';
+      const typeLabel = h.type === 'government' ? t('govtBadge') : t('privateBadge');
+      const emLabel = h.emergency === 'verified' ? ` · ${t('emergency247')}` : '';
       marker.bindPopup(
         `<div style="min-width:200px;max-width:260px">
            <div style="font-weight:700;font-size:13px;line-height:1.35">${i + 1}. ${escapeHtml(h.name)}</div>
            ${dist}
-           <div style="font-size:11px;margin-top:4px;color:#1f7453;font-weight:600;text-transform:uppercase">${h.type === 'government' ? 'Government' : 'Private'}${h.emergency === 'verified' ? ' · Emergency 24×7' : ''}</div>
-           <a href="/hospitals/${encodeURIComponent(h.id)}" style="display:inline-block;margin-top:6px;background:#1f7453;color:#fff;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none">View details →</a>
+           <div style="font-size:11px;margin-top:4px;color:#1f7453;font-weight:600;text-transform:uppercase">${escapeHtml(typeLabel)}${escapeHtml(emLabel)}</div>
+           <a href="/hospitals/${encodeURIComponent(h.id)}" style="display:inline-block;margin-top:6px;background:#1f7453;color:#fff;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:700;text-decoration:none">${escapeHtml(t('viewDetails'))} →</a>
          </div>`,
       );
       marker.addTo(layer);
     });
 
     if (userLocation) {
-      L.marker([userLocation.lat, userLocation.lng], { icon: markerIcon('you', 'user'), title: 'Your location', zIndexOffset: 1000 })
-        .bindPopup('<div style="font-weight:700;font-size:13px">Your location</div>')
+      L.marker([userLocation.lat, userLocation.lng], { icon: markerIcon(t('youShort'), 'user'), title: t('yourLocation'), zIndexOffset: 1000 })
+        .bindPopup(`<div style="font-weight:700;font-size:13px">${escapeHtml(t('yourLocation'))}</div>`)
         .addTo(layer);
     }
-  }, [hospitals, userLocation]);
+  }, [hospitals, userLocation, lang, t]);
 
-  return <div ref={containerRef} className={`h-72 sm:h-96 w-full border border-brand-100 ${className}`} role="application" aria-label="Interactive map of nearby hospitals" />;
+  return <div ref={containerRef} className={`h-72 sm:h-96 w-full border border-brand-100 ${className}`} role="application" aria-label={t('mapAriaLabel')} />;
 }
 
 function escapeHtml(s: string) {

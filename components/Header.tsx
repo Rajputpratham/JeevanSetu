@@ -27,10 +27,10 @@ export default function Header() {
     <header className="sticky top-0 z-50">
       {/* Emergency strip */}
       <div className="bg-red-800 text-white text-center text-xs sm:text-[13px] font-semibold px-3 py-1.5 leading-snug print-hidden">
-        <span className="sr-only">Emergency: </span>
+        <span className="sr-only">{t('emergencyStripPrefix')}</span>
         {t('emergencyStrip')}{' '}
         <a href="tel:112" className="underline underline-offset-2 font-bold whitespace-nowrap hover:text-amber-200">
-          tel:112 →
+          {t('emergencyStripCall')}
         </a>
       </div>
 
@@ -40,7 +40,7 @@ export default function Header() {
             <Logo />
 
             {/* Desktop nav */}
-            <nav className="hidden lg:flex items-center gap-1 text-[15px] font-semibold text-slate-700" aria-label="Main navigation">
+            <nav className="hidden lg:flex items-center gap-1 text-[15px] font-semibold text-slate-700" aria-label={t('navMainAria')}>
               {nav.map((item) => (
                 <Link
                   key={item.href}
@@ -57,7 +57,7 @@ export default function Header() {
 
             <div className="flex items-center gap-1.5 sm:gap-2">
               {/* Compare shortcut with badge */}
-              <Link href="/compare" aria-label={`Compare hospitals (${ids.length} selected)`}
+              <Link href="/compare" aria-label={t('compareShortcutAria', { count: ids.length })}
                 className="relative p-2.5 rounded-xl text-brand-800 hover:bg-brand-50 min-h-[44px] min-w-[44px] flex items-center justify-center">
                 <GitCompareArrows size={22} strokeWidth={2} />
                 {ids.length > 0 && (
@@ -71,7 +71,7 @@ export default function Header() {
               <button
                 type="button"
                 onClick={() => setLang(lang === 'en' ? 'hi' : 'en')}
-                aria-label={lang === 'en' ? 'Switch to Hindi' : 'अंग्रेज़ी पर स्विच करें'}
+                aria-label={lang === 'en' ? t('switchToHindiAria') : t('switchToEnglishAria')}
                 className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl border border-brand-200 text-brand-800 font-bold text-sm hover:bg-brand-50 min-h-[44px]"
               >
                 <Languages size={18} strokeWidth={2} />
@@ -79,12 +79,12 @@ export default function Header() {
               </button>
 
               {/* 112 button */}
-              <a href="tel:112" className="hidden sm:inline-flex items-center gap-2 bg-red-700 hover:bg-red-800 text-white font-extrabold rounded-xl px-4 py-2.5 min-h-[44px] text-sm tracking-wide">
-                <PhoneCall size={18} strokeWidth={2.5} /> 112
+              <a href="tel:112" aria-label={t('call112Now')} className="hidden sm:inline-flex items-center gap-2 bg-red-700 hover:bg-red-800 text-white font-extrabold rounded-xl px-4 py-2.5 min-h-[44px] text-sm tracking-wide">
+                <PhoneCall size={18} strokeWidth={2.5} /> {t('navEmergency112')}
               </a>
 
               {/* Hamburger */}
-              <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="mobile-nav" aria-label={open ? 'Close menu' : 'Open menu'}
+              <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-controls="mobile-nav" aria-label={open ? t('closeMenuAria') : t('openMenuAria')}
                 className="lg:hidden p-2.5 rounded-xl text-slate-700 hover:bg-slate-100 min-h-[44px] min-w-[44px]">
                 {open ? <X size={24} /> : <Menu size={24} />}
               </button>
@@ -95,7 +95,7 @@ export default function Header() {
         {/* Mobile nav panel */}
         {open && (
           <div id="mobile-nav" className="lg:hidden border-t border-brand-100 bg-white px-4 pb-5 pt-2">
-            <nav className="grid gap-1.5" aria-label="Mobile navigation">
+            <nav className="grid gap-1.5" aria-label={t('navMobileAria')}>
               {nav.map((item) => (
                 <Link key={item.href} href={item.href} onClick={() => setOpen(false)}
                   className={`px-4 py-3.5 rounded-xl font-semibold text-base ${
@@ -105,7 +105,7 @@ export default function Header() {
                 </Link>
               ))}
               <a href="tel:112" className="mt-1 flex items-center justify-center gap-2 bg-red-700 text-white font-extrabold rounded-xl px-4 py-4 text-lg">
-                <PhoneCall size={22} strokeWidth={2.5} /> {lang === 'hi' ? 'अभी 112 पर कॉल करें' : 'Call 112 Now'}
+                <PhoneCall size={22} strokeWidth={2.5} /> {t('call112Now')}
               </a>
             </nav>
           </div>

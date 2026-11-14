@@ -27,16 +27,18 @@ export async function POST(request: NextRequest) {
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Invalid request body' }, { status: 400 });
     }
-    const { treatmentId, includedTests, stayDays, roomType } = body as {
+    const { treatmentId, includedTests, stayDays, roomType, lang } = body as {
       treatmentId?: string;
       includedTests?: number[];
       stayDays?: number;
       roomType?: RoomType;
+      lang?: 'en' | 'hi';
     };
 
+    const safeLang = lang === 'hi' ? 'hi' : 'en';
     const treatment = treatmentId ? getTreatmentById(treatmentId) : undefined;
     if (!treatment) {
-      return NextResponse.json({ error: 'Unknown treatment' }, { status: 400 });
+      return NextResponse.json({ error: safeLang === 'hi' ? 'अज्ञात इलाज' : 'Unknown treatment' }, { status: 400 });
     }
     const maxTestIdx = treatment.tests.length - 1;
     const included = Array.isArray(includedTests)
@@ -48,12 +50,16 @@ export async function POST(request: NextRequest) {
       : 'general';
     const safeDays = Math.min(90, Math.max(0, Number(stayDays) || 0));
 
-    const result = estimateTreatment(treatment, {
-      treatmentId: treatment.id,
-      includedTests: included,
-      stayDays: safeDays,
-      roomType: safeRoom,
-    });
+    const result = estimateTreatment(
+      treatment,
+      {
+        treatmentId: treatment.id,
+        includedTests: included,
+        stayDays: safeDays,
+        roomType: safeRoom,
+      },
+      safeLang,
+    );
 
     return NextResponse.json(result);
   } catch (err) {

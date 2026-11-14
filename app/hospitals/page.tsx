@@ -26,6 +26,7 @@ export default async function HospitalsPage({
       initialSpeciality={str('speciality')}
       initialEmergency={str('emergency') === '1'}
       initialRadius={Number.isFinite(initialRadius) && initialRadius > 0 ? initialRadius : 25}
+      initialEmpty={str('empty') === '1'}
     />
   );
 }
