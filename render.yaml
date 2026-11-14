@@ -1,0 +1,31 @@
+# Render Blueprint for JeevanSetu
+# https://render.com/docs/blueprint-spec
+#
+# Deploy: Render Dashboard → New → Blueprint → pick this repo → Apply.
+# Provisions one Node web service serving the Next.js 15 app (pages + /api
+# routes). No database, secrets or external API keys are required.
+
+services:
+  - type: web
+    name: jeevansetu
+    runtime: node
+    # Free instance: sleeps after ~15 min idle, then cold-starts in ~30-60s.
+    # Use "starter" for an always-on instance.
+    plan: free
+    # Singapore is the closest Render region to India (cannot be changed later).
+    region: singapore
+    branch: main
+    # --include=dev keeps tailwindcss/typescript available even when
+    # NODE_ENV=production, which `next build` requires.
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm run start
+    # Render only routes traffic to an instance once this returns 2xx.
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_VERSION
+        value: 22.22.3
+      # Canonical URL for metadata/sitemap/robots. Unset = jeevansetu.in.
+      # On a preview/staging service set this to the onrender.com URL.
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false

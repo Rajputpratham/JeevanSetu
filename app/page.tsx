@@ -12,6 +12,7 @@ import CostTeaser from '@/components/home/CostTeaser';
 import EmergencyAssistance from '@/components/home/EmergencyAssistance';
 import { HOSPITAL_COUNT, EMERGENCY_VERIFIED_COUNT } from '@/data/hospitals';
 import { TREATMENT_COUNT } from '@/data/treatments';
+import { SITE_URL, absoluteUrl } from '@/lib/site';
 
 const FEATURES = [
   {
@@ -74,11 +75,11 @@ export default function HomePage() {
     '@context': 'https://schema.org',
     '@type': 'WebSite',
     name: 'JeevanSetu',
-    url: 'https://www.jeevansetu.in',
+    url: SITE_URL,
     description: 'Find nearby hospitals, compare facilities and estimate treatment costs across India.',
     potentialAction: {
       '@type': 'SearchAction',
-      target: 'https://www.jeevansetu.in/hospitals?q={search_term_string}',
+      target: `${absoluteUrl('/hospitals')}?q={search_term_string}`,
       'query-input': 'required name=search_term_string',
     },
   };

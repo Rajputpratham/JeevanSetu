@@ -21,8 +21,17 @@ Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · Leaflet + O
 npm install
 npm run dev        # http://localhost:3000
 npm run build      # production build
-npm start          # serve production build
+npm start          # serve production build (honours PORT)
 ```
+
+Set `NEXT_PUBLIC_SITE_URL` (see `.env.example`) when the app is served from a
+non-production host, so canonical tags, `robots.txt` and `sitemap.xml` match.
+
+## Deploy
+
+**Render** — the repo ships a [`render.yaml`](./render.yaml) Blueprint (Node web
+service, free plan, Singapore region, `/api/health` check). Steps, manual setup,
+custom domains and free-tier caveats: **[DEPLOY.md](./DEPLOY.md)**.
 
 ## Honesty policy
 
