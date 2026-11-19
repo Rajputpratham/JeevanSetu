@@ -14,7 +14,7 @@ interface Props {
 }
 
 export default function RatingsSection({ hospitalId, hospitalName }: Props) {
-  const { t } = useLang();
+  const { t, lang } = useLang();
   const [summary, setSummary] = useState<CommunityScoreSummary | null>(null);
   const [reviews, setReviews] = useState<CommunityReview[]>([]);
   const [googleData, setGoogleData] = useState<GoogleRatingResponse | null>(null);
@@ -24,11 +24,11 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
   const [formOpen, setFormOpen] = useState(false);
   const [authorAlias, setAuthorAlias] = useState('');
   const [visitType, setVisitType] = useState<CommunityReview['visitType']>('OPD');
-  const [overall, setOverall] = useState<number>(4);
-  const [doctorCare, setDoctorCare] = useState<number>(4);
-  const [cleanliness, setCleanliness] = useState<number>(4);
-  const [waitTime, setWaitTime] = useState<number>(3);
-  const [billingTransparency, setBillingTransparency] = useState<number>(4);
+  const [overall, setOverall] = useState<number>(0);
+  const [doctorCare, setDoctorCare] = useState<number>(0);
+  const [cleanliness, setCleanliness] = useState<number>(0);
+  const [waitTime, setWaitTime] = useState<number>(0);
+  const [billingTransparency, setBillingTransparency] = useState<number>(0);
   const [comment, setComment] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -137,7 +137,7 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
                   {t('communityScoreLabel')}
                 </span>
                 <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-0.5 text-[10px] font-bold text-amber-900">
-                  IMDb-style Bayesian
+                  {lang === 'hi' ? 'भारित औसत' : 'Weighted average'}
                 </span>
               </div>
 
@@ -154,7 +154,7 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
                 </div>
               ) : (
                 <p className="mt-3 text-sm font-semibold text-slate-600">
-                  Not yet scored — 0 eligible community reviews. Be the first to share your experience.
+                  {!summary ? (lang === 'hi' ? 'समीक्षा डेटा नहीं मिल सका।' : 'Review data could not be loaded.') : (lang === 'hi' ? 'अभी कोई पात्र सामुदायिक समीक्षा नहीं है।' : 'Not yet scored — 0 eligible community reviews.')}
                 </p>
               )}
 
@@ -203,7 +203,7 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
               )}
             </div>
 
-            {summary && (
+            {summary && summary.eligibleCount > 0 && (
               <p className="mt-3 text-[10px] text-slate-500 leading-snug">{summary.formulaNote}</p>
             )}
           </div>
@@ -251,13 +251,10 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
               ) : (
                 <div className="mt-3 rounded-xl bg-white border border-slate-200 p-3.5">
                   <p className="text-xs font-bold text-slate-800">
-                    {googleData?.status === 'awaiting-api-key'
-                      ? 'Live Google Places API not configured in this environment'
-                      : 'Live Google rating unavailable right now'}
+                    Live Google rating unavailable
                   </p>
                   <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">
-                    {googleData?.note ??
-                      'JeevanSetu never displays fabricated Google ratings. Open Google Maps below to inspect live public ratings and reviews for this hospital.'}
+                    {lang === 'hi' ? 'सार्वजनिक रेटिंग और समीक्षाएँ देखने के लिए Google Maps खोलें।' : 'Open Google Maps to check public ratings and reviews.'}
                   </p>
                 </div>
               )}
@@ -344,11 +341,12 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
                 Overall Experience (1–5 ★)
               </label>
               <select
-                id="rev-overall"
-                value={overall}
+                id="rev-overall" required
+                value={overall || ""}
                 onChange={(e) => setOverall(Number(e.target.value))}
                 className="input !py-2 !text-sm !min-h-[42px]"
               >
+                <option value="" disabled>—</option>
                 {[5, 4, 3, 2, 1].map((n) => (
                   <option key={n} value={n}>
                     {n} ★
@@ -370,12 +368,13 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
                   {m.label}
                 </label>
                 <select
-                  id={m.id}
-                  value={m.val}
+                  id={m.id} required
+                  value={m.val || ""}
                   onChange={(e) => m.set(Number(e.target.value))}
                   className="input !py-1.5 !px-2.5 !text-xs !min-h-[38px]"
                 >
-                  {[5, 4, 3, 2, 1].map((n) => (
+                  <option value="" disabled>—</option>
+                {[5, 4, 3, 2, 1].map((n) => (
                     <option key={n} value={n}>
                       {n} / 5
                     </option>

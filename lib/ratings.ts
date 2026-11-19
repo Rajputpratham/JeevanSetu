@@ -1,4 +1,4 @@
-import { CommunityReview, INITIAL_COMMUNITY_REVIEWS } from '@/data/reviews';
+import { type CommunityReview } from '@/data/reviews';
 import { Hospital } from '@/data/types';
 
 /**
@@ -32,7 +32,7 @@ export interface CommunityScoreSummary {
 }
 
 export function computeGlobalPriorMean(allReviews: CommunityReview[]): number {
-  const eligible = allReviews.filter((r) => r.moderationStatus === 'approved');
+  const eligible = allReviews.filter((r) => !r.isDemoSeed && r.moderationStatus === 'approved');
   if (eligible.length === 0) return 4.0;
   const sum = eligible.reduce((acc, r) => acc + r.overall, 0);
   return Number((sum / eligible.length).toFixed(2));
@@ -44,7 +44,7 @@ export function computeCommunityScore(
 ): CommunityScoreSummary {
   const priorMean = computeGlobalPriorMean(allReviews);
   const eligible = allReviews.filter(
-    (r) => r.hospitalId === hospitalId && r.moderationStatus === 'approved',
+    (r) => r.hospitalId === hospitalId && !r.isDemoSeed && r.moderationStatus === 'approved',
   );
   const v = eligible.length;
   const distribution: Record<1 | 2 | 3 | 4 | 5, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -109,11 +109,8 @@ export function computeCommunityScore(
   };
 }
 
-/**
- * In-memory runtime review store (seeded from INITIAL_COMMUNITY_REVIEWS so user-submitted
- * moderated reviews persist across API calls during the server lifecycle).
- */
-const runtimeReviews: CommunityReview[] = [...INITIAL_COMMUNITY_REVIEWS];
+/** Moderated submissions only; volatile and scoped to this server instance. */
+const runtimeReviews: CommunityReview[] = [];
 
 export function getAllReviews(): CommunityReview[] {
   return runtimeReviews;
@@ -121,7 +118,7 @@ export function getAllReviews(): CommunityReview[] {
 
 export function getReviewsForHospital(hospitalId: string): CommunityReview[] {
   return runtimeReviews
-    .filter((r) => r.hospitalId === hospitalId && r.moderationStatus === 'approved')
+    .filter((r) => r.hospitalId === hospitalId && !r.isDemoSeed && r.moderationStatus === 'approved')
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 

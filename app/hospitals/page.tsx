@@ -17,10 +17,13 @@ export default async function HospitalsPage({
     const v = sp[k];
     return (Array.isArray(v) ? v[0] : v)?.trim() || undefined;
   };
+  const sort = str('sort');
   const typeParam = str('type');
   const initialRadius = Number(str('radius'));
   return (
     <DiscoveryClient
+      key={JSON.stringify(sp)}
+      initialSort={sort === 'type' || sort === 'rating' || sort === 'name' ? sort : 'distance'}
       initialQ={str('q')}
       initialType={typeParam === 'government' || typeParam === 'private' ? typeParam : 'all'}
       initialSpeciality={str('speciality')}

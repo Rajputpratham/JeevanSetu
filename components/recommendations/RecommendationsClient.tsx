@@ -1,5 +1,6 @@
 'use client';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { classifyIntent } from '@/lib/assistant/intent';
 import Link from 'next/link';
 import {
   Sparkles, Loader2, CheckCircle2, AlertTriangle, PhoneCall,
@@ -39,6 +40,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const urgent = classifyIntent(problem).emergency;
   const mappedCandidate = useMemo(() => specialityForProblem(problem), [problem]);
   const lastSpecRef = useRef<string | null>(null);
 
@@ -57,7 +59,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
       params.set('lng', String(location.lng));
     }
     try {
-      const res = await fetch(`/api/recommendations?${params}`);
+      const res = await fetch(`/api/recommendations?${params}`, {signal: AbortSignal.timeout(15000)});
       const data = await res.json();
       if (!res.ok) { setError(data.error ?? t('recFailedError')); return; }
       setResults(data.results ?? []);
@@ -72,6 +74,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
+    if (urgent) return;
     const spec = speciality || mappedCandidate || '';
     if (!spec) {
       setError(t('recMissingSpecError'));
@@ -113,13 +116,14 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
         {t('recSubPost')}
       </p>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-5 items-start">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5 items-start">
         {/* ─── Input panel ─── */}
-        <form onSubmit={onSubmit} className="lg:col-span-2 card p-5 sm:p-6 flex flex-col gap-5" aria-label={t('recFormAria')}>
+        <form onSubmit={onSubmit} className="min-w-0 lg:col-span-2 card p-5 sm:p-6 flex flex-col gap-5" aria-label={t('recFormAria')}>
           <div>
             <label htmlFor="problem" className="label">{t('recProblemLabel')} <span className="font-normal text-slate-400">{t('optionalParen')}</span></label>
             <input id="problem" className="input" placeholder={t('recProblemPlaceholder')} value={problem} onChange={(e) => setProblem(e.target.value)} autoComplete="off" />
-            {mappedCandidate && <p className="mt-1.5 text-xs font-semibold text-brand-800 flex items-center gap-1.5"><Stethoscope size={13} />{t('recLooksLike')} <strong>{tSpeciality(mappedCandidate, lang)}</strong></p>}
+            {urgent && <div role="alert" className="mt-2 rounded-xl bg-red-50 p-3 text-red-900"><p>{lang === 'hi' ? 'अगर यह अभी हो रहा है, अस्पताल खोजने में समय न लगाएँ।' : 'If this is happening now, do not wait for a hospital recommendation.'}</p><a href="tel:112" className="btn-danger mt-2">{t('call112Now')}</a> <a href="https://112.gov.in/" className="underline">ERSS India</a></div>}
+            {!urgent && mappedCandidate && <p className="mt-1.5 text-xs font-semibold text-brand-800 flex items-center gap-1.5"><Stethoscope size={13} />{t('recLooksLike')} <strong>{tSpeciality(mappedCandidate, lang)}</strong></p>}
           </div>
 
           <div>
@@ -131,7 +135,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
             <p className="mt-1 text-[11px] text-slate-500">{t('recAutoMapHint')}</p>
           </div>
 
-          <fieldset>
+          <fieldset className="min-w-0">
             <legend className="label">{t('recHospitalTypeLabel')}</legend>
             <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label={t('recHospitalTypeLabel')}>
               {([['any', t('recNoPref')], ['government', t('govtBadge')], ['private', t('privateBadge')]] as const).map(([val, lab]) => (
@@ -145,7 +149,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
             </div>
           </fieldset>
 
-          <fieldset>
+          <fieldset className="min-w-0">
             <legend className="label">{t('recBudgetLabel')}</legend>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2" role="radiogroup" aria-label={t('recBudgetLabel')}>
               {([['any', t('recBudgetAny')], ['low', t('recBudgetLow')], ['medium', t('recBudgetMed')], ['high', t('recBudgetHigh')]] as const).map(([val, lab]) => (
@@ -157,7 +161,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
             </div>
           </fieldset>
 
-          <fieldset>
+          <fieldset className="min-w-0">
             <legend className="label">{t('recFacilitiesLabel')} <span className="font-normal text-slate-400">{t('optionalParen')}</span></legend>
             <div className="flex flex-wrap gap-2">
               {FACILITY_OPTIONS.map((f) => {
@@ -172,8 +176,8 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
             </div>
           </fieldset>
 
-          <div className="flex flex-col sm:flex-row sm:items-center gap-3 border-t border-slate-100 pt-4">
-            <button type="submit" disabled={busy} className="btn-primary flex-1">
+          <div className="flex flex-col sm:flex-row sm:items-center flex-wrap gap-3 border-t border-slate-100 pt-4">
+            <button type="submit" disabled={busy || urgent} className="btn-primary flex-1">
               {busy ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
               {busy ? t('recFindingBtn') : t('recGetBtn')}
             </button>
@@ -183,7 +187,7 @@ export default function RecommendationsClient({ initialSpeciality }: { initialSp
         </form>
 
         {/* ─── Results panel ─── */}
-        <div className="lg:col-span-3" aria-live="polite">
+        <div hidden={urgent} className="min-w-0 lg:col-span-3" aria-live="polite">
           {error && (
             <div role="alert" className="card border-red-200 bg-red-50 p-5 flex items-start gap-3">
               <AlertCircle className="text-red-600 shrink-0 mt-0.5" size={22} />

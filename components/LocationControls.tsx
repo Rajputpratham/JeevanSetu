@@ -80,12 +80,12 @@ export default function LocationControls({ onOriginChange, className = '', compa
     const q = query.trim();
     setPanelError(null);
     setCandidates(null);
-    if (q.length < 2) {
+    if (mode === 'address' && q.length < 2) {
       setPanelError(t('manualMinCharsError'));
       return;
     }
-    if (mode === 'pincode' && !/^[1-9][0-9]{5}$/.test(q.replace(/\s+/g, ''))) {
-      setPanelError('Enter a valid 6-digit Indian PIN code, e.g. 110085.');
+    if (mode === 'pincode' && !/^[1-9][0-9]{5}$/.test(q)) {
+      setPanelError(lang === 'hi' ? 'छह अंकों का सही पिन कोड लिखें, जैसे 110085।' : 'Enter a valid 6-digit Indian PIN code, e.g. 110085.');
       return;
     }
     setBusy(true);
@@ -199,7 +199,7 @@ export default function LocationControls({ onOriginChange, className = '', compa
         {isTracking && (
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-800">
             <span className="h-2 w-2 rounded-full bg-emerald-600 animate-pulse" aria-hidden="true" />
-            Live location on
+            {lang === 'hi' ? 'लाइव स्थान चालू है' : 'Live location on'}
           </span>
         )}
         {lastFix && (
@@ -234,15 +234,9 @@ export default function LocationControls({ onOriginChange, className = '', compa
           aria-expanded={panel === 'map'}
           className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-2 py-2 text-[11px] font-bold text-slate-700 hover:border-brand-500"
         >
-          <LocateFixed size={13} /> {ls.selectOnMap}
+          <LocateFixed size={13} /> {lang === 'hi' ? 'शहर चुनें' : 'Choose a city'}
         </button>
-        <button
-          type="button"
-          onClick={() => { setPanel('none'); setCandidates(null); setPanelError(null); }}
-          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 px-2 py-2 text-[11px] font-bold text-slate-700 hover:border-brand-500"
-        >
-          <RefreshCw size={13} /> {ls.refreshRoutes}
-        </button>
+
       </div>
 
       {/* Address / PIN panel */}
@@ -309,10 +303,10 @@ export default function LocationControls({ onOriginChange, className = '', compa
       {panel === 'map' && (
         <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2.5">
           <p className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5">
-            <LocateFixed size={13} /> {ls.selectOnMap}
+            <LocateFixed size={13} /> {lang === 'hi' ? 'शहर चुनें' : 'Choose a city'}
           </p>
           <p className="mt-1 text-[11px] text-slate-500">
-            Pick the centre of the area you are starting from. JeevanSetu uses this exact point as the routing origin.
+            {lang === 'hi' ? 'दूरी चुने हुए शहर के केंद्र से मापी जाएगी, आपके सटीक स्थान से नहीं।' : 'Distances start at the selected city centre, not your exact address.'}
           </p>
           <div className="mt-2 grid grid-cols-3 gap-1.5">
             {CITY_PRESETS.slice(0, 12).map((c) => (

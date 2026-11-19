@@ -28,7 +28,7 @@ export function CompareProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     try {
       const saved = window.localStorage.getItem(STORAGE);
-      if (saved) setIds((JSON.parse(saved) as string[]).filter((x) => typeof x === 'string').slice(0, MAX_COMPARE));
+      if (saved) setIds(Array.from(new Set((JSON.parse(saved) as string[]).filter((x) => typeof x === 'string'))).slice(0, MAX_COMPARE));
     } catch { /* ignore */ }
   }, []);
 

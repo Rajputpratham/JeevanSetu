@@ -169,7 +169,7 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
 
           {/* Google Routes driving distance + traffic-aware ETA */}
           <div
-            className="rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 shrink-0"
+            className="rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 max-w-full md:max-w-[45%]"
             data-testid="detail-travel-summary"
           >
             <div className="flex items-center gap-4">
@@ -473,6 +473,8 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
                 </span>
               </li>
             </ul>
+            <p className="mt-4 text-xs leading-relaxed text-slate-600">{lang === 'hi' ? 'इस रिकॉर्ड में अंतिम जाँच की तारीख उपलब्ध नहीं है। जाने से पहले सुविधाओं की पुष्टि करें।' : 'Last verification date not recorded. Confirm services directly before travelling.'}</p>
+            <a className="mt-2 block text-xs font-bold text-brand-800 underline" href="https://facility.abdm.gov.in/">{lang === 'hi' ? 'ABDM स्वास्थ्य सुविधा रजिस्ट्री' : 'Check the ABDM Health Facility Registry'}</a>
             <a
               href={`mailto:hello@jeevansetu.in?subject=${encodeURIComponent(`Correction: ${h.shortName}`)}`}
               className="mt-3 inline-flex items-center gap-2 text-xs font-bold text-brand-800 hover:underline"

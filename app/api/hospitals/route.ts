@@ -20,7 +20,7 @@ const CACHE_TTL_MS = 60_000;
  * hospital is returned with `distanceKm: null` and the response carries
  * `distanceSource: 'unavailable'` so the UI can say so instead of guessing.
  *
- * `lat`/`lng` are REQUIRED. Omitting them no longer silently assumes Delhi.
+ * `lat`/`lng` are optional as a pair. Without them we skip the routing provider.
  */
 export async function GET(request: NextRequest) {
   try {
@@ -28,22 +28,11 @@ export async function GET(request: NextRequest) {
     const latRaw = sp.get('lat');
     const lngRaw = sp.get('lng');
 
-    if (!latRaw || !lngRaw) {
-      return NextResponse.json(
-        {
-          error: 'lat and lng are required — JeevanSetu does not assume a default location.',
-          code: 'ORIGIN_REQUIRED',
-        },
-        { status: 400 },
-      );
-    }
-
-    const lat = parseFloat(latRaw);
-    const lng = parseFloat(lngRaw);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+    const hasOrigin = latRaw !== null || lngRaw !== null;
+    const lat = Number(latRaw), lng = Number(lngRaw);
+    if (hasOrigin && (!latRaw?.trim() || !lngRaw?.trim() || !Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat)>90 || Math.abs(lng)>180)) {
       return NextResponse.json({ error: 'Invalid coordinates', code: 'BAD_ORIGIN' }, { status: 400 });
     }
-
     const radius = Math.min(Math.max(parseFloat(sp.get('radius') ?? '500') || 500, 1), 1000);
     const typeRaw = sp.get('type');
     if (typeRaw && !['government', 'private', 'all'].includes(typeRaw)) {
@@ -52,7 +41,7 @@ export async function GET(request: NextRequest) {
     const type = typeRaw as HospitalType | 'all' | null;
     const speciality = sp.get('speciality');
     const emergencyOnly = sp.get('emergency') === '1';
-    const q = (sp.get('q') ?? '').trim().toLowerCase();
+    const q = (sp.get('q') ?? '').trim().toLowerCase().replace(/एम्स|^aims$/g, 'aiims').replace(/सफदरजंग|safdarjang/g, 'safdarjung').replace(/gurgaon|गुड़गांव/g, 'gurugram').replace(/bangalore/g, 'bengaluru').replace(/bombay/g, 'mumbai');
     const sort = sp.get('sort') ?? 'distance';
     const langParam = sp.get('lang') ?? 'en';
     const lang = isValidLang(langParam) ? langParam : 'en';
@@ -69,7 +58,7 @@ export async function GET(request: NextRequest) {
     if (type && type !== 'all') filtered = filtered.filter((h) => h.type === type);
     if (speciality) filtered = filtered.filter((h) => h.specialities.includes(speciality));
     if (emergencyOnly) {
-      filtered = filtered.filter((h) => h.emergency === 'verified' || h.emergency === 'unverified');
+      filtered = filtered.filter((h) => h.emergency === 'verified');
     }
     if (q) {
       filtered = filtered.filter((h) =>
@@ -97,14 +86,14 @@ export async function GET(request: NextRequest) {
     }
 
     // ── 2. One authoritative travel snapshot for the whole result set ─────────
-    const snapshot = await cached(
+    const snapshot = hasOrigin ? await cached(
       travelCacheKey(['hospitals', lat, lng, filtered.map((h) => h.id).join('+')]),
       CACHE_TTL_MS,
       () => getTravelSnapshot({ origin: { lat, lng }, originSource, hospitals: filtered, language: 'en-IN' }),
-    );
+    ) : null;
 
     const results = filtered.map((h) => {
-      const leg = snapshot.legs[h.id];
+      const leg = snapshot?.legs[h.id];
       const geo = resolveHospitalGeo(h);
       const community = computeCommunityScore(h.id, allReviews);
       return {
@@ -132,8 +121,9 @@ export async function GET(request: NextRequest) {
 
     const known = results.filter((h) => typeof h.distanceKm === 'number');
     const withinRadius = results.filter((h) => typeof h.distanceKm === 'number' && (h.distanceKm as number) <= radius);
-    const fellBack = known.length > 0 && withinRadius.length === 0;
-    const finalList = fellBack ? known : withinRadius.length > 0 ? withinRadius : results;
+    const unrestricted = sp.get('unrestrictedRadius') === '1';
+    const fellBack = !unrestricted && known.length > 0 && withinRadius.length === 0;
+    const finalList = unrestricted ? results : fellBack ? known : withinRadius.length > 0 ? withinRadius : results;
 
     finalList.sort((a, b) => {
       if (sort === 'name') return a.shortName.localeCompare(b.shortName);
@@ -162,12 +152,12 @@ export async function GET(request: NextRequest) {
       note: fellBack ? fellBackNote : undefined,
       results: finalList,
       /** Provenance for every distance in this response. */
-      distanceSource: snapshot.source,
-      distanceDisclosure: snapshot.disclosure,
-      travelComputedAt: snapshot.computedAt,
-      requestId: snapshot.requestId,
-      origin: { lat, lng, source: originSource },
-      blockers: snapshot.blockers,
+      distanceSource: snapshot?.source,
+      distanceDisclosure: snapshot?.disclosure,
+      travelComputedAt: snapshot?.computedAt,
+      requestId: snapshot?.requestId,
+      origin: hasOrigin ? { lat, lng, source: originSource } : null,
+      blockers: snapshot?.blockers,
     });
   } catch (err) {
     console.error('[api/hospitals]', err);

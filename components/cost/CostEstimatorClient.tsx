@@ -53,14 +53,14 @@ export default function CostEstimatorClient() {
     } catch (err) {
       if ((err as Error).name !== 'AbortError') setError(t('estimateNetworkError'));
     } finally {
-      setBusy(false);
+      if (!controller.signal.aborted) setBusy(false);
     }
   }, [treatmentId, includedTests, stayDays, roomType, lang, t]);
 
   // Recompute automatically (debounced) whenever inputs or language change
   useEffect(() => {
     const id = setTimeout(compute, 250);
-    return () => clearTimeout(id);
+    return () => { clearTimeout(id); abortRef.current?.abort(); };
   }, [compute]);
 
   const toggleTest = (i: number) =>
@@ -93,9 +93,9 @@ export default function CostEstimatorClient() {
         {t('costSubPost')}
       </p>
 
-      <div className="mt-6 grid gap-6 lg:grid-cols-5 items-start">
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-5 items-start">
         {/* ─── Controls ─── */}
-        <div className="lg:col-span-2 card p-5 sm:p-6 flex flex-col gap-5">
+        <div className="min-w-0 lg:col-span-2 card p-5 sm:p-6 flex flex-col gap-5">
           <div>
             <label htmlFor="treatment" className="label">{t('step1Treatment')}</label>
             <select id="treatment" value={treatmentId} onChange={(e) => setTreatmentId(e.target.value)} className="input appearance-none">
@@ -136,7 +136,7 @@ export default function CostEstimatorClient() {
             )}
           </div>
 
-          <fieldset>
+          <fieldset className="min-w-0">
             <legend className="label">{t('step3Tests')}<span className="font-normal text-slate-400">{t('uncheckHint')}</span></legend>
             <div className="flex flex-col gap-2">
               {treatment.tests.map((test, i) => (
@@ -152,14 +152,14 @@ export default function CostEstimatorClient() {
           {noRoom ? (
             <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">{t('dayCareOpdNote')}</p>
           ) : (
-            <fieldset className="grid grid-cols-2 gap-3">
+            <fieldset className="grid sm:grid-cols-2 gap-3 min-w-0">
               <div>
                 <label htmlFor="stay" className="label">{t('step4Nights')}</label>
                 <div className="flex items-stretch rounded-xl border border-slate-300 overflow-hidden">
                   <button type="button" aria-label={t('oneNightLess')} onClick={() => setStayDays((d) => Math.max(0, d - 1))} className="px-4 text-xl font-bold bg-slate-50 hover:bg-slate-100">−</button>
                   <input id="stay" type="number" inputMode="numeric" min={0} max={90} value={stayDays}
-                    onChange={(e) => setStayDays(Math.min(90, Math.max(0, Number(e.target.value) || 0)))}
-                    className="w-full text-center text-lg font-bold py-3 outline-none" />
+                    onChange={(e) => setStayDays(Math.min(90, Math.max(0, Math.trunc(Number(e.target.value)) || 0)))}
+                    className="w-full min-w-0 text-center text-lg font-bold py-3 outline-none" />
                   <button type="button" aria-label={t('oneNightMore')} onClick={() => setStayDays((d) => Math.min(90, d + 1))} className="px-4 text-xl font-bold bg-slate-50 hover:bg-slate-100">+</button>
                 </div>
                 <p className="mt-1 text-[11px] text-slate-500">{t('typicalStayHint', { min: treatment.typicalStayDays[0], max: treatment.typicalStayDays[1] })}</p>
@@ -181,7 +181,7 @@ export default function CostEstimatorClient() {
         </div>
 
         {/* ─── Result ─── */}
-        <div className="lg:col-span-3 flex flex-col gap-4" aria-live="polite" aria-busy={busy}>
+        <div className="min-w-0 lg:col-span-3 flex flex-col gap-4" aria-live="polite" aria-busy={busy}>
           {error && (
             <div role="alert" className="card border-red-200 bg-red-50 p-5 flex items-start gap-3">
               <AlertTriangle className="text-red-600 shrink-0 mt-0.5" size={22} />
@@ -220,8 +220,8 @@ export default function CostEstimatorClient() {
               )}
 
               {/* Itemised table */}
-              <div className="overflow-x-auto px-2 sm:px-4 py-4">
-                <table className="w-full text-sm min-w-[520px]">
+              <div className="overflow-x-auto print:overflow-visible px-2 sm:px-4 py-4">
+                <table className="w-full text-sm min-w-[520px] print:min-w-0">
                   <thead>
                     <tr className="text-left text-[11px] uppercase tracking-wider text-slate-500 border-b-2 border-slate-200">
                       <th scope="col" className="py-2 pr-3">{t('thComponent')}</th>
@@ -255,7 +255,7 @@ export default function CostEstimatorClient() {
               {/* Disclaimer */}
               <div className="border-t border-slate-100 px-5 py-4 text-[11px] leading-relaxed text-slate-500">
                 <p className="flex items-start gap-1.5"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-brand-700" />{result.disclaimer}</p>
-                <p className="mt-2"><strong>{t('freeSubsidisedPrefix')}</strong>{t('freeSubsidisedBody')}</p>
+                <p className="mt-2"><strong>{t('freeSubsidisedPrefix')}</strong>{t('freeSubsidisedBody')} <a href="https://nha.gov.in/PM-JAY" className="underline">NHA · PM-JAY</a></p>
                 <p className="mt-2">{t('unsureWhereToGo')}{' '}
                   <Link href="/compare" className="text-brand-800 font-semibold underline">{t('compareHospitalsLink')}</Link>
                   {' '}{t('orWord')}{' '}

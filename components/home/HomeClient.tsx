@@ -3,7 +3,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import {
   MapPin, Sparkles, Calculator, GitCompareArrows, FileText, Siren,
-  ChevronRight, ShieldCheck, Languages, Wifi, HeartPulse,
+  ChevronRight, HeartPulse,
 } from 'lucide-react';
 import QuickSearch from '@/components/home/QuickSearch';
 import NearbySection from '@/components/home/NearbySection';
@@ -52,77 +52,46 @@ const FAQ_KEYS: { q: DictKey; a: DictKey }[] = [
 ];
 
 export default function HomeClient() {
-  const { t } = useLang();
+  const { t, lang } = useLang();
 
   return (
     <>
       {/* ─── HERO ─────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-br from-brand-50 via-cream to-cream" aria-hidden="true" />
-        <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8 pb-12 lg:pt-14 lg:pb-16 grid lg:grid-cols-2 gap-10 items-center">
-          <div>
-            <span className="inline-flex items-center gap-2 rounded-full bg-white border border-brand-200 text-brand-800 text-[11px] sm:text-xs font-bold px-4 py-2 shadow-sm">
-              <HeartPulse size={14} className="text-brand-600" /> {t('heroBadge')}
-            </span>
-            <h1 className="mt-4 text-4xl sm:text-5xl xl:text-6xl font-black tracking-tight text-brand-950 leading-[1.08]">
-              {t('heroTitleLine1')}<br />
-              <span className="text-brand-700">{t('heroTitleLine2')}</span>
-            </h1>
-            <p className="mt-4 text-lg text-slate-700 max-w-lg leading-snug">
-              {t('heroSub')}
-            </p>
-            <div className="mt-6 flex flex-col sm:flex-row flex-wrap gap-3">
-              <Link href="/hospitals" className="btn-primary text-base !px-6 !py-4 !min-h-[56px]">
-                <MapPin size={21} strokeWidth={2.5} /> {t('heroBtnFind')}
-              </Link>
-              <Link href="/emergency" className="btn-danger text-base !px-6 !py-4 !min-h-[56px]">
-                <Siren size={21} strokeWidth={2.5} /> {t('heroBtnEmergency')}
-              </Link>
+      <section className="care-hero">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-7 lg:pt-12 pb-7">
+          <div className="grid items-center gap-7 lg:grid-cols-[1.05fr_1fr] lg:gap-12">
+            <div>
+              <p className="care-kicker"><span aria-hidden="true" />{t('heroBadge')}</p>
+              <h1 className="care-headline mt-5">{t('heroTitleLine1')}<br/><em>{t('heroTitleLine2')}</em></h1>
+              <p className="mt-5 max-w-lg text-base sm:text-lg leading-relaxed text-brand-900">{t('heroSub')}</p>
+              <div className="mt-6 flex flex-wrap items-center gap-3">
+                <Link href="/hospitals" className="btn-primary"><MapPin size={18}/>{t('heroBtnFind')}</Link>
+                <Link href="/emergency" className="btn bg-white border border-red-200 px-4 py-3 text-red-800 hover:bg-red-50"><Siren size={18}/> {t('heroBtnEmergency')}</Link>
+              </div>
             </div>
-            <p className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500">
-              <span className="inline-flex items-center gap-1.5"><ShieldCheck size={14} className="text-brand-700" /> {t('heroTrustNoSignup')}</span>
-              <span className="inline-flex items-center gap-1.5"><Wifi size={14} className="text-brand-700" /> {t('heroTrust3G')}</span>
-              <span className="inline-flex items-center gap-1.5"><Languages size={14} className="text-brand-700" /> {t('heroTrustLang')}</span>
-            </p>
+            <figure className="care-portrait relative overflow-hidden">
+              <Image src="/images/hero-doctor-family.jpg" alt={t('heroImageAlt')} width={880} height={640} sizes="(min-width:1024px) 48vw, 100vw" priority className="w-full object-cover aspect-[1.68]" />
+              <figcaption className="absolute bottom-4 left-4 inline-flex items-center gap-2 rounded-full bg-white/95 px-3 py-2 text-xs font-semibold text-brand-900"><HeartPulse size={15}/>{lang === 'hi' ? 'परिवार स्वास्थ्य मार्गदर्शिका' : 'Family care guide'}</figcaption>
+            </figure>
           </div>
-          <div className="relative">
-            <div className="rounded-3xl overflow-hidden border-4 border-white shadow-2xl">
-              <Image
-                src="/images/hero-doctor-family.jpg"
-                alt={t('heroImageAlt')}
-                width={880}
-                height={640}
-                priority
-                className="object-cover w-full h-[340px] sm:h-[420px] lg:h-[480px]"
-              />
-            </div>
-          </div>
+          <div className="mt-7 lg:mt-9"><QuickSearch /></div>
         </div>
       </section>
-
-      {/* ─── QUICK SEARCH ─────────────────────────────────────── */}
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 -mt-2 lg:-mt-6 relative z-10">
-        <QuickSearch />
-      </div>
 
       {/* ─── LIVE NEARBY HOSPITALS ────────────────────────────── */}
       <NearbySection />
 
       {/* ─── SIX FEATURE CARDS ────────────────────────────────── */}
-      <section aria-labelledby="features-heading" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-14 pb-8">
+      <section aria-labelledby="features-heading" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-8 pb-8">
         <p className="text-xs font-bold uppercase tracking-widest text-brand-700">{t('featuresEyebrow')}</p>
         <h2 id="features-heading" className="section-title mt-1">{t('sectionFeatures')}</h2>
         <p className="section-sub">{t('featuresSub')}</p>
         <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FEATURES.map(({ icon: Icon, titleKey, descKey, ctaKey, href, tint }) => (
             <Link key={titleKey} href={href}
-              className="card p-5 sm:p-6 flex flex-col group hover:shadow-lg hover:-translate-y-0.5 transition-all focus-visible:outline-none">
-              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${tint}`}><Icon size={24} strokeWidth={2} /></div>
-              <h3 className="mt-4 font-extrabold text-lg text-slate-900 leading-snug">{t(titleKey)}</h3>
-              <p className="mt-1.5 text-sm text-slate-600 leading-relaxed">{t(descKey)}</p>
-              <span className="mt-4 inline-flex items-center gap-1.5 text-sm font-extrabold text-brand-800 group-hover:gap-2.5 transition-all">
-                {t(ctaKey)} <ChevronRight size={17} strokeWidth={2.5} />
-              </span>
+              className="card p-4 flex items-center gap-4 group hover:border-brand-300 hover:bg-brand-50 transition-colors" title={t(descKey)}>
+              <span className={`shrink-0 w-11 h-11 rounded-xl flex items-center justify-center ${tint}`}><Icon size={21}/></span>
+              <h3 className="font-bold text-base text-brand-900">{t(titleKey)}</h3><ChevronRight className="ms-auto shrink-0 text-brand-700" size={18} aria-label={t(ctaKey)}/>
             </Link>
           ))}
         </div>

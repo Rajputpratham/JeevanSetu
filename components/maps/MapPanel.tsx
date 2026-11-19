@@ -26,6 +26,7 @@ function MapSkeleton() {
  * OpenStreetMap tile set while calling it "Google Maps" would be misleading.
  */
 export default function MapPanel(props: ComponentProps<typeof GoogleMapViewLazy>) {
+  const {lang} = useLang();
   if (!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY && !process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY) {
     return (
       <div
@@ -33,10 +34,9 @@ export default function MapPanel(props: ComponentProps<typeof GoogleMapViewLazy>
         role="status"
         data-testid="map-key-missing"
       >
-        <p className="text-sm font-bold text-brand-900">Interactive map unavailable</p>
+        <p className="text-sm font-bold text-brand-900">{lang === 'hi' ? 'यहाँ नक्शा उपलब्ध नहीं है' : 'Map preview unavailable'}</p>
         <p className="max-w-lg text-xs text-slate-600">
-          Hospital lists, verified Google driving distances and directions all work. The interactive
-          Google Map needs a browser-restricted <code className="rounded bg-white px-1">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code>.
+          {lang === 'hi' ? 'रास्ता देखने के लिए अस्पताल का दिशा-निर्देश लिंक खोलें।' : 'Use the hospital’s directions link to open the route in Google Maps.'}
         </p>
       </div>
     );

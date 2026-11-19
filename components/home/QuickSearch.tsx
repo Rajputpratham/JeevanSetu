@@ -30,7 +30,8 @@ export default function QuickSearch() {
       <div className="relative flex-1 flex items-center">
         <Search size={20} className="absolute left-4 text-slate-400 pointer-events-none" aria-hidden="true" />
         <label htmlFor="qs-q" className="sr-only">{t('searchPlaceholder')}</label>
-        <input id="qs-q" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('searchPlaceholder')} className="input !pl-12 !pr-11" autoComplete="off" />
+        <input id="qs-q" list="quick-places" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('searchPlaceholder')} className="input !pl-12 !pr-11" autoComplete="off" />
+        <datalist id="quick-places">{["AIIMS", "Safdarjung", "Delhi", "Gurugram", "एम्स", "दिल्ली"].map(value => <option key={value} value={value}/>)}</datalist>
         <div className="absolute right-1.5">
           <VoiceSearchButton onTranscript={(txt) => setQ(txt)} />
         </div>

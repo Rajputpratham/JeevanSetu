@@ -16,7 +16,7 @@ const nextConfig = {
            * Google Maps needs its own origins for scripts/images.
            */
           { key: 'Permissions-Policy', value: 'geolocation=(self), microphone=(self), camera=()' },
-          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          ...(process.env.ARENA_PREVIEW === '1' ? [] : [{ key: 'X-Frame-Options', value: 'SAMEORIGIN' }]),
           { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
         ],
       },

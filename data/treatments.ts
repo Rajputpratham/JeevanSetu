@@ -99,7 +99,7 @@ export const TREATMENTS: Treatment[] = [
     roomPerDay: null,
     typicalStayDays: [0, 0],
     medicines: { govt: [0, 0], private: [0, 0] },
-    note: 'Every emergency department does an ECG free or near-free during casualty triage.',
+    note: 'Ask the hospital which charges are included and whether any scheme applies to your visit.',
     sourceNote: SRC,
   },
   {
@@ -116,7 +116,7 @@ export const TREATMENTS: Treatment[] = [
     roomPerDay: { govt: [0, 1500], private: [1500, 8000] },
     typicalStayDays: [1, 3],
     medicines: { govt: [200, 1200], private: [1500, 8000] },
-    note: 'Under Janani Suraksha Yojana / JSY most government deliveries for eligible women are FREE, including cash assistance.',
+    note: 'Ask the hospital which charges are included and whether any scheme applies to your visit.',
     sourceNote: SRC,
   },
   {
@@ -133,7 +133,7 @@ export const TREATMENTS: Treatment[] = [
     roomPerDay: { govt: [0, 2000], private: [3000, 10000] },
     typicalStayDays: [3, 5],
     medicines: { govt: [400, 2500], private: [3000, 15000] },
-    note: 'Government caesareans are either free or heavily subsidised (JSY/PM-JAY). Private bills vary widely by room category.',
+    note: 'Ask the hospital which charges are included and whether any scheme applies to your visit.',
     sourceNote: SRC,
   },
   {
@@ -147,7 +147,7 @@ export const TREATMENTS: Treatment[] = [
     roomPerDay: { govt: [0, 500], private: [1000, 5000] },
     typicalStayDays: [0, 1],
     medicines: { govt: [50, 400], private: [500, 3000] },
-    note: 'Under the National Programme for Control of Blindness, cataract surgery is FREE at government facilities in many states.',
+    note: 'Ask the hospital which charges are included and whether any scheme applies to your visit.',
     sourceNote: SRC,
   },
   {
@@ -178,7 +178,7 @@ export const TREATMENTS: Treatment[] = [
     roomPerDay: { govt: [0, 2500], private: [4000, 15000] },
     typicalStayDays: [2, 4],
     medicines: { govt: [500, 3000], private: [5000, 25000] },
-    note: 'PM-JAY covers angioplasty up to package ceilings at empanelled hospitals. Drug-eluting stent cost varies.',
+    note: 'Ask the hospital which charges are included and whether any scheme applies to your visit.',
     sourceNote: SRC,
   },
   {
@@ -192,7 +192,7 @@ export const TREATMENTS: Treatment[] = [
     roomPerDay: null,
     typicalStayDays: [0, 0],
     medicines: { govt: [100, 800], private: [500, 3000] },
-    note: 'Under Pradhan Mantri National Dialysis Programme, dialysis is FREE at many district hospitals. 2–3 sessions/week typically needed.',
+    note: 'Ask the hospital which charges are included and whether any scheme applies to your visit.',
     sourceNote: SRC,
   },
   {

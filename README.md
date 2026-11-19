@@ -13,7 +13,7 @@ No sign-up. Hindi + English UI. Works on low-end Android phones.
 
 ## Tech stack
 
-Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · Leaflet + OpenStreetMap (no API keys) · data shipped as typed in-repo datasets (`data/hospitals.ts`, `data/treatments.ts`) behind server-side API routes (`/api/hospitals`, `/api/recommendations`, `/api/estimate`, `/api/emergency`).
+Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · Google Maps / Places / Routes (optional; see `.env.example`) · data shipped as typed in-repo datasets (`data/hospitals.ts`, `data/treatments.ts`) behind server-side API routes (`/api/hospitals`, `/api/recommendations`, `/api/estimate`, `/api/emergency`).
 
 ## Develop
 
@@ -31,3 +31,7 @@ npm start          # serve production build
 - JeevanSetu is not medical advice. In an emergency call **112**.
 
 See `/disclaimer` in the app for full sourcing and `/privacy` for data handling.
+
+## Verification and integration status
+
+See [the implementation handoff](docs/qa/HANDOFF.md) for the route matrix, local browser regression commands, screenshots, mobile performance measurement and outstanding release checks.

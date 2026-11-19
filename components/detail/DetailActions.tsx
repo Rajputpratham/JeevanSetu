@@ -26,9 +26,7 @@ export default function DetailActions({ hospital }: { hospital: Hospital }) {
         <div className="rounded-xl border-2 border-amber-300 bg-amber-50 px-4 py-3 text-center">
           <p className="text-sm font-bold text-amber-900">{t('detailPhoneNotListedHeading')}</p>
           <p className="text-xs text-amber-800 mt-0.5">
-            {t('detailPhoneNotListedSubPre')}
-            <a href="tel:104" className="underline font-semibold">104</a>
-            {t('detailPhoneNotListedSubPost')}
+            {t('notListedCall104')}
           </p>
         </div>
       )}

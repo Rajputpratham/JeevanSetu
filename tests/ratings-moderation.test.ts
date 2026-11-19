@@ -5,7 +5,7 @@ import {
   rankHospitals,
   BAYESIAN_MIN_REVIEWS,
 } from '@/lib/ratings';
-import { INITIAL_COMMUNITY_REVIEWS } from '@/data/reviews';
+import { INITIAL_COMMUNITY_REVIEWS } from './fixtures/reviews';
 import { HOSPITALS } from '@/data/hospitals';
 import { moderateReviewInput } from '@/lib/moderation';
 
@@ -18,8 +18,10 @@ describe('Module 6, 8 & 9 — IMDb-Style Bayesian Community Score, Moderation & 
   });
 
   it('computes exact IMDb-style Bayesian Weighted Rating WR = (v/(v+m))R + (m/(v+m))C', () => {
-    const C = computeGlobalPriorMean(INITIAL_COMMUNITY_REVIEWS);
-    const summary = computeCommunityScore('aiims-new-delhi', INITIAL_COMMUNITY_REVIEWS);
+    expect(computeCommunityScore('aiims-new-delhi', INITIAL_COMMUNITY_REVIEWS).eligibleCount).toBe(0);
+    const reports = INITIAL_COMMUNITY_REVIEWS.map(r => ({...r, isDemoSeed:false}));
+    const C = computeGlobalPriorMean(reports);
+    const summary = computeCommunityScore('aiims-new-delhi', reports);
     expect(summary.eligibleCount).toBe(3);
     const R = (5 + 4 + 5) / 3;
     const v = 3;

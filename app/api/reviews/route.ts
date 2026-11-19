@@ -11,10 +11,8 @@ import { checkRateLimit, moderateReviewInput } from '@/lib/moderation';
 
 export const dynamic = 'force-dynamic';
 
-function clampRating(n: unknown, fallback: 1 | 2 | 3 | 4 | 5 = 4): 1 | 2 | 3 | 4 | 5 {
-  const v = Math.round(Number(n));
-  if (v >= 1 && v <= 5) return v as 1 | 2 | 3 | 4 | 5;
-  return fallback;
+function isRating(value: unknown): value is CommunityReview['overall'] {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= 5;
 }
 
 export function GET(request: NextRequest) {
@@ -82,7 +80,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unknown hospital.' }, { status: 400 });
     }
 
-    const overallVal = clampRating(overall, 4);
+    if (!isRating(overall) || !isRating(doctorCare) || !isRating(cleanliness) || !isRating(waitTime) || !isRating(billingTransparency)) {
+      return NextResponse.json({error:'Choose a rating from 1 to 5 for each field.'}, {status:400});
+    }
+    const overallVal = overall;
     const mod = moderateReviewInput(
       {
         hospitalId,
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
     const safeMonth =
       typeof visitMonth === 'string' && /^\d{4}-\d{2}$/.test(visitMonth)
         ? visitMonth
-        : new Date().toISOString().slice(0, 7);
+        : ''; // No visit month was supplied; do not infer it from submission time.
 
     const newReview: CommunityReview = {
       id: `rev-user-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -115,10 +116,10 @@ export async function POST(request: NextRequest) {
       visitMonth: safeMonth,
       overall: overallVal,
       metrics: {
-        doctorCare: clampRating(doctorCare, overallVal),
-        cleanliness: clampRating(cleanliness, overallVal),
-        waitTime: clampRating(waitTime, overallVal),
-        billingTransparency: clampRating(billingTransparency, overallVal),
+        doctorCare,
+        cleanliness,
+        waitTime,
+        billingTransparency,
       },
       comment: mod.sanitizedComment,
       verificationStatus: 'community-unverified',

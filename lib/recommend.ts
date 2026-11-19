@@ -48,6 +48,7 @@ export function recommendHospitals(all: Hospital[], input: RecommendInput): Reco
   const specLabel = tSpeciality(input.speciality, lang);
 
   for (const h of all) {
+    if (!input.facilitiesWanted.every(f => h.facilities.includes(f))) continue;
     const reasons: string[] = [];
     const cautions: string[] = [];
     let score = 0;
@@ -101,7 +102,7 @@ export function recommendHospitals(all: Hospital[], input: RecommendInput): Reco
         reasons.push(
           h.type === 'government'
             ? hi ? 'सरकारी अस्पताल — बहुत कम शुल्क' : 'Government hospital — much lower charges'
-            : hi ? 'निजी अस्पताल — कम प्रतीक्षा समय, अधिक सुविधाएं' : 'Private hospital — shorter waits, more amenities',
+            : hi ? 'आपकी निजी अस्पताल की पसंद से मेल खाता है' : 'Matches your private hospital preference',
         );
       } else {
         score -= 8;

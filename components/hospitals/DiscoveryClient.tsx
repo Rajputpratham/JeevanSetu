@@ -2,8 +2,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  Search, LocateFixed, Loader2, SlidersHorizontal, Map as MapIcon, List,
-  AlertCircle, Building2, Landmark, Siren, X, MapPin, GitCompareArrows, Info,
+  Search, Loader2, SlidersHorizontal, Map as MapIcon, List,
+  AlertCircle, Building2, Landmark, Siren, X, GitCompareArrows, Info,
   Bookmark, Clock, Navigation, Route as RouteIcon,
 } from 'lucide-react';
 import { useUserLocation } from '@/lib/useLocation';
@@ -40,6 +40,7 @@ export interface RouteDetailPayload {
 }
 
 interface DiscoveryProps {
+  initialSort?: 'distance'|'rating'|'name'|'type';
   initialQ?: string;
   initialType?: 'government' | 'private' | 'all';
   initialSpeciality?: string;
@@ -49,7 +50,10 @@ interface DiscoveryProps {
   initialSavedOnly?: boolean;
 }
 
+const locationPath = (query: string) => `/hospitals${query ? '?' + query : ''}`;
+
 export default function DiscoveryClient({
+  initialSort = 'distance',
   initialQ = '',
   initialType = 'all',
   initialSpeciality = '',
@@ -61,7 +65,7 @@ export default function DiscoveryClient({
   const { t, lang } = useLang();
   const { ids: compareIds } = useCompare();
   const { savedIds } = useSavedHospitals();
-  const { location, requestGeolocation, status, errorCode, hasLocation } = useUserLocation();
+  const { location, errorCode, hasLocation } = useUserLocation();
 
   const [q, setQ] = useState(initialQ);
   const [type, setType] = useState<'all' | 'government' | 'private'>(initialType);
@@ -69,7 +73,7 @@ export default function DiscoveryClient({
   const [emergencyOnly, setEmergencyOnly] = useState(initialEmergency);
   const [savedOnly, setSavedOnly] = useState(initialSavedOnly);
   const [radius, setRadius] = useState(initialRadius);
-  const [sort, setSort] = useState<'distance' | 'rating' | 'name' | 'type'>('distance');
+  const [sort, setSort] = useState<'distance' | 'rating' | 'name' | 'type'>(initialSort);
   const [showEmptyNotice, setShowEmptyNotice] = useState(initialEmpty && !initialQ && !initialSpeciality);
 
   const [results, setResults] = useState<EnrichedHospital[] | null>(null);
@@ -91,20 +95,13 @@ export default function DiscoveryClient({
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const pending = useRef<AbortController | null>(null);
   const fetchHospitals = useCallback(() => {
-    /**
-     * No origin → no request. The previous version silently sent Delhi's
-     * coordinates, which is how different pages ended up showing different
-     * distances for the same hospital.
-     */
-    if (!hasLocation) {
-      setResults(null);
-      setDistanceMeta(null);
-      return;
-    }
+    pending.current?.abort();
+    const controller = new AbortController();
+    pending.current = controller;
     const params = new URLSearchParams({
-      lat: String(location.lat),
-      lng: String(location.lng),
+      ...(hasLocation ? {lat: String(location.lat), lng: String(location.lng)} : {}),
       source: location.source,
       radius: String(savedOnly ? 1000 : radius),
       type,
@@ -112,10 +109,11 @@ export default function DiscoveryClient({
       lang,
     });
     if (q.trim()) params.set('q', q.trim());
+    if (savedOnly) params.set('unrestrictedRadius','1');
     if (speciality) params.set('speciality', speciality);
     if (emergencyOnly) params.set('emergency', '1');
     setListError(false);
-    fetch(`/api/hospitals?${params}`)
+    fetch(`/api/hospitals?${params}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Request failed'))))
       .then((data) => {
         setResults(data.results ?? []);
@@ -127,7 +125,7 @@ export default function DiscoveryClient({
           computedAt: data.travelComputedAt ?? '',
         });
       })
-      .catch(() => setListError(true));
+      .catch(() => { if (!controller.signal.aborted) setListError(true); });
   }, [hasLocation, location.lat, location.lng, location.source, radius, savedOnly, type, speciality, emergencyOnly, q, sort, lang]);
 
   // Debounced refetch on control change (preserves origin, selectedHospitalId, and filters across language switch!)
@@ -135,9 +133,47 @@ export default function DiscoveryClient({
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(fetchHospitals, 180);
     return () => {
+      pending.current?.abort();
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [fetchHospitals]);
+
+  // Next can restore a cached route tree on Back. Its server props predate any
+  // in-place filter edits, so restore the actual history entry before writing it.
+  const [urlReady,setUrlReady] = useState(false);
+  useEffect(() => {
+    const restore = () => {
+      if (window.location.pathname !== '/hospitals') return;
+      const params = new URLSearchParams(window.location.search);
+      const type = params.get('type'), sort = params.get('sort');
+      setQ(params.get('q') ?? '');
+      setType(type === 'government' || type === 'private' ? type : 'all');
+      setSort(sort === 'rating' || sort === 'name' || sort === 'type' ? sort : 'distance');
+      setSpeciality(params.get('speciality') ?? '');
+      setRadius(Math.min(1000,Math.max(1, Number(params.get('radius')) || 25)));
+      setEmergencyOnly(params.get('emergency') === '1');
+      setSavedOnly(params.get('saved') === '1');
+      setUrlReady(true);
+    };
+    restore();
+    window.addEventListener('popstate',restore);
+    return () => window.removeEventListener('popstate',restore);
+  }, []);
+
+  // Keep only directory controls in shareable URLs, never a routing origin.
+  useEffect(() => {
+    if (!urlReady) return;
+    const params = new URLSearchParams();
+    if (q.trim()) params.set('q', q.trim());
+    if (type !== 'all') params.set('type', type);
+    if (speciality) params.set('speciality', speciality);
+    if (emergencyOnly) params.set('emergency','1');
+    if (savedOnly) params.set('saved','1');
+    if (radius !== 25) params.set('radius', String(radius));
+    if (sort !== 'distance') params.set('sort', sort);
+    const search = params.toString();
+    window.history.replaceState(null, '', locationPath(search));
+  }, [urlReady,q,type,speciality,emergencyOnly,savedOnly,radius,sort]);
 
   const displayedResults = useMemo(() => {
     if (!results) return null;
@@ -212,7 +248,15 @@ export default function DiscoveryClient({
     setShowEmptyNotice(false);
   };
 
-  const hasActiveFilters = q !== '' || type !== 'all' || speciality !== '' || emergencyOnly || savedOnly;
+  const chips = [
+    {label:q, clear:()=>setQ('')},
+    {label:type === 'all' ? '' : t(type === 'government' ? 'govtBadge' : 'privateBadge'),clear:()=>setType('all')},
+    {label:speciality && tSpeciality(speciality,lang), clear:()=>setSpeciality('')},
+    {label:emergencyOnly && t('emergency247'),clear:()=>setEmergencyOnly(false)},
+    {label:savedOnly && t('savedLabel'),clear:()=>setSavedOnly(false)},
+    {label:radius !== 25 && `${radius} km`,clear:()=>setRadius(25)},
+  ].filter(chip=>chip.label);
+  const hasActiveFilters = chips.length > 0 || sort !== 'distance';
   const govtCount = useMemo(
     () => displayedResults?.filter((r) => r.type === 'government').length ?? 0,
     [displayedResults],
@@ -256,22 +300,14 @@ export default function DiscoveryClient({
             <Bookmark size={16} className={savedOnly ? 'fill-amber-500 text-amber-600' : ''} />
             {t('savedLabel')} ({savedIds.length})
           </button>
-          <button
-            type="button"
-            onClick={requestGeolocation}
-            disabled={status === 'locating'}
-            className="btn-primary !py-2.5 !text-sm"
-          >
-            {status === 'locating' ? <Loader2 size={17} className="animate-spin" /> : <LocateFixed size={17} />}{' '}
-            {t('useMyLocation')}
-          </button>
+
         </div>
       </div>
 
       {/* ── Central location control (requirement 3) ── */}
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
         <div className="lg:col-span-1">
-          <LocationControls onOriginChange={() => setSelectedHospitalId(null)} />
+          <details className="card p-4"><summary className="cursor-pointer text-sm font-bold text-brand-900">{hasLocation ? t('yourLocation') : t('useMyLocation')}</summary><LocationControls onOriginChange={() => setSelectedHospitalId(null)} /></details>
         </div>
         <div className="card p-4 lg:col-span-2">
           <label htmlFor="hosp-search" className="label">
@@ -305,20 +341,13 @@ export default function DiscoveryClient({
               {geoErrorText}
             </p>
           )}
-          {!hasLocation && (
-            <p role="status" className="mt-2 flex items-start gap-1.5 text-xs text-amber-800">
-              <Info size={14} className="mt-0.5 shrink-0" />
-              {ls.notSetWhy}
-            </p>
-          )}
-          {distanceMeta && (
+
+          {hasLocation && distanceMeta && (
             <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-snug text-slate-500" data-testid="distance-disclosure">
               <RouteIcon size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
               <span>
                 {distanceMeta.disclosure.text}
-                {distanceMeta.blockers.length > 0 && (
-                  <span className="mt-0.5 block font-semibold text-amber-800">{distanceMeta.blockers[0]}</span>
-                )}
+
               </span>
             </p>
           )}
@@ -490,6 +519,7 @@ export default function DiscoveryClient({
         </div>
       </div>
 
+      {chips.length > 0 && <div className="mt-2 flex flex-wrap gap-2">{chips.map((chip,i)=><button key={i} className="chip min-h-[40px] max-w-full" onClick={chip.clear}><span className="truncate">{chip.label}</span><X size={14}/></button>)}</div>}
       {/* Compare status banner */}
       {compareIds.length > 0 && (
         <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm">
@@ -559,7 +589,8 @@ export default function DiscoveryClient({
             <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-600">
               <input
                 type="checkbox"
-                checked={showTraffic}
+                disabled={!process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY && !process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY}
+                checked={showTraffic && Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || process.env.NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY)}
                 onChange={(e) => setShowTraffic(e.target.checked)}
                 className="h-4 w-4 accent-brand-700"
               />
@@ -568,7 +599,7 @@ export default function DiscoveryClient({
             <span className="text-[10px] text-slate-400">
               {distanceMeta?.computedAt
                 ? `${ds.lastUpdated}: ${new Date(distanceMeta.computedAt).toLocaleTimeString()}`
-                : ds.sourceGoogle}
+                : ''}
             </span>
           </div>
 
@@ -647,7 +678,7 @@ export default function DiscoveryClient({
               )}
               {activeRoute?.error && (
                 <p className="mt-1 text-[10px] font-semibold text-amber-800" data-testid="route-error">
-                  {activeRoute.error} — {ds.distanceUnavailableWhy}
+                  {ds.distanceUnavailableWhy}
                 </p>
               )}
 
@@ -690,17 +721,6 @@ export default function DiscoveryClient({
                 {t('retryBtn')}
               </button>
             </div>
-          ) : !hasLocation ? (
-            <div className="card p-6 text-center" role="status" data-testid="origin-required">
-              <MapPin className="mx-auto text-brand-400" size={34} />
-              <h2 className="mt-2 font-bold text-lg text-slate-800">{ls.notSet}</h2>
-              <p className="mx-auto mt-1 max-w-md text-sm text-slate-600">{ls.notSetWhy}</p>
-              <div className="mt-4 flex flex-wrap justify-center gap-2">
-                <button type="button" onClick={requestGeolocation} className="btn-primary !py-2.5 !text-sm">
-                  <LocateFixed size={16} /> {ls.usePrecise}
-                </button>
-              </div>
-            </div>
           ) : displayedResults === null ? (
             [0, 1, 2].map((i) => (
               <div key={i} className="card p-5 animate-pulse" aria-hidden="true">
@@ -714,7 +734,7 @@ export default function DiscoveryClient({
             <div className="card p-8 text-center">
               <Search className="mx-auto text-slate-300" size={36} />
               <h2 className="mt-2 font-bold text-lg text-slate-800">
-                {q.trim() ? t('noHospitalsMatchQuery', { query: q.trim() }) : t('noHospitalsMatch')}
+                {savedOnly && !savedIds.length ? (lang === 'hi' ? 'अभी कोई अस्पताल सहेजा नहीं गया है' : 'No saved hospitals yet') : q.trim() ? t('noHospitalsMatchQuery', { query: q.trim() }) : t('noHospitalsMatch')}
               </h2>
               <p className="mt-1 text-sm text-slate-600">{t('noHospitalsMatchHint')}</p>
               <button type="button" onClick={clearFilters} className="btn-primary mt-4">

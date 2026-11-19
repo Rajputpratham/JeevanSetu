@@ -45,6 +45,11 @@ export default function NearbySection() {
       : tPresetLabel(location.label, lang)
     : locationStrings(lang).notSet;
 
+  if (!hasLocation) return <aside className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm text-brand-900 sm:px-6 lg:px-8">
+    <span className="inline-flex items-center gap-2"><MapPin size={16}/>{lang === 'hi' ? 'स्थान बताए बिना भी अस्पताल खोज सकते हैं।' : 'Browse the directory without sharing your location.'}</span>
+    <button className="min-h-[44px] underline underline-offset-4 font-semibold" onClick={requestGeolocation} disabled={status === 'locating'}>{t('useMyLocation')}</button>
+    {errorCode && <span role="alert">{errorCode === 'denied' ? t('geoDeniedError') : t('geoFailedError')}</span>}
+  </aside>;
   return (
     <section aria-labelledby="nearby-heading" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
