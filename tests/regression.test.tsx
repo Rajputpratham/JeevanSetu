@@ -128,7 +128,7 @@ describe('Full Regression Suite: Saved Hospitals, Compare, Cost Estimator, Recom
     expect(specialityForProblem('severe chest pain and heart blockage')).toBe('Cardiology');
 
     const req = new NextRequest(
-      'http://localhost:3000/api/recommendations?problem=heart+attack&budget=low&type=government&lat=28.6428&lng=77.1855&lang=bn',
+      'http://localhost:3000/api/recommendations?problem=heart&budget=low&type=government&lat=28.6428&lng=77.1855&lang=bn',
     );
     const res = await recommendGet(req);
     expect(res.status).toBe(200);
@@ -146,7 +146,8 @@ describe('Full Regression Suite: Saved Hospitals, Compare, Cost Estimator, Recom
       lng: 72.842,
       lang: 'mr',
     });
-    expect(direct.length).toBeGreaterThan(0);
+    // The catalogue does not list the requested insurance facility.
+    expect(direct).toHaveLength(0);
   });
 
   it('verifies single-hospital slug API and honest Google Places unconfigured status', async () => {

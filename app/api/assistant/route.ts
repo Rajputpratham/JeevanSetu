@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       istHour?: number;
     };
 
-    const text = (message ?? '').trim();
+    const text = typeof message === 'string' ? message.trim() : '';
     if (!text) {
       return NextResponse.json({ error: 'Please type a message.', code: 'EMPTY_MESSAGE' }, { status: 400 });
     }
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       safeOrigin = {
         lat: origin.lat,
         lng: origin.lng,
-        label: (origin.label ?? 'Your location').slice(0, 160),
+        label: typeof origin.label === 'string' ? origin.label.slice(0,160) : 'Your location',
         source:
           origin.source === 'geolocation' ||
           origin.source === 'manual' ||

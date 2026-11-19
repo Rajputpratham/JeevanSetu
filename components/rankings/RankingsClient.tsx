@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
-  Trophy, Star, Siren, Landmark, Building2, Info, Navigation, Clock, GitCompareArrows, Check,
+  Trophy, Star, Siren, Landmark, Building2, Navigation, Clock, GitCompareArrows, Check,
 } from 'lucide-react';
 import { ALL_SPECIALITIES, HOSPITALS } from '@/data/hospitals';
 import { useLang } from '@/lib/i18n';
@@ -156,14 +156,7 @@ export default function RankingsClient() {
       </div>
 
       {/* Methodology disclosure */}
-      <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-xs text-amber-950 flex items-start gap-2">
-        <Info size={16} className="mt-0.5 shrink-0 text-amber-700" />
-        <p>
-          <strong>Transparent Methodology:</strong>{' '}
-          {methodology ||
-            'Composite Score (0–100) combines Verified Facilities (30), Speciality Breadth (25), Verified 24×7 Emergency (15), Public Affordability (15), and IMDb-style Bayesian Community Score (15). This leaderboard reflects infrastructure breadth, affordability, and community experience — never a paid placement or clinical survival claim.'}
-        </p>
-      </div>
+      <details className="mt-4 card p-4 text-sm text-brand-900"><summary className="cursor-pointer font-semibold">{lang === 'hi' ? 'अंक कैसे तय होते हैं?' : 'How the directory score works'}</summary><p className="mt-2">{methodology}</p></details>
 
       {/* Podium cards for top 3 */}
       {topThree.length > 0 && (

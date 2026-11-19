@@ -23,6 +23,7 @@ export default function VoiceSearchButton({ onTranscript, className = '' }: Prop
   const { t, lang } = useLang();
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
+  const [failed,setFailed] = useState(false);
   const recRef = useRef<SpeechRecognitionInstance | null>(null);
 
   useEffect(() => {
@@ -49,6 +50,7 @@ export default function VoiceSearchButton({ onTranscript, className = '' }: Prop
       return;
     }
 
+    setFailed(false);
     try {
       const rec = new Ctor();
       rec.lang = getLangMeta(lang).speechLocale;
@@ -61,12 +63,13 @@ export default function VoiceSearchButton({ onTranscript, className = '' }: Prop
         }
         setListening(false);
       };
-      rec.onerror = () => setListening(false);
+      rec.onerror = () => { setListening(false); setFailed(true); };
       rec.onend = () => setListening(false);
       recRef.current = rec;
       setListening(true);
       rec.start();
     } catch {
+      setFailed(true);
       setListening(false);
     }
   }, [lang, listening, onTranscript]);
@@ -76,7 +79,7 @@ export default function VoiceSearchButton({ onTranscript, className = '' }: Prop
   }
 
   return (
-    <button
+    <><button
       type="button"
       onClick={toggleVoice}
       aria-label={t('voiceSearchAria')}
@@ -89,6 +92,6 @@ export default function VoiceSearchButton({ onTranscript, className = '' }: Prop
       } ${className}`}
     >
       {listening ? <MicOff size={18} /> : <Mic size={18} />}
-    </button>
+    </button>{failed && <span role="status" className="absolute end-0 top-full z-20 w-48 rounded-lg bg-white p-2 text-xs text-red-800 shadow">{lang === "hi" ? "आवाज़ नहीं सुन पाए। फिर प्रयास करें या टाइप करें।" : "Voice input failed. Try again or type instead."}</span>}</>
   );
 }

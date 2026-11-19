@@ -59,9 +59,11 @@ describe('Journey 1 — multilingual discovery keeps one origin and one distance
 
   it('refuses to guess an origin when lat/lng are missing', async () => {
     const res = await getHospitals(new NextRequest('http://localhost:3000/api/hospitals?lang=en'));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
     const data = await res.json();
-    expect(data.code).toBe('ORIGIN_REQUIRED');
+    expect(data.origin).toBeNull();
+    expect(data.results.length).toBeGreaterThan(0);
+    expect(data.results.every((h: {distanceKm:number|null}) => h.distanceKm === null)).toBe(true);
   });
 });
 

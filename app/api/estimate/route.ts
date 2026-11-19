@@ -42,6 +42,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: safeLang === 'hi' ? 'अज्ञात इलाज' : 'Unknown treatment' }, { status: 400 });
     }
     const maxTestIdx = treatment.tests.length - 1;
+    if ((stayDays !== undefined && (!Number.isInteger(stayDays) || stayDays < 0 || stayDays > 90 || (!treatment.roomPerDay && stayDays > 0))) ||
+        (roomType !== undefined && !['general','semi-private','private','icu'].includes(roomType)) ||
+        (includedTests !== undefined && (!Array.isArray(includedTests) || includedTests.some(i => !Number.isInteger(i) || i < 0 || i > maxTestIdx)))) {
+      return NextResponse.json({error: safeLang === 'hi' ? 'जाँच, रातों की संख्या और कमरे का प्रकार देखें।' : 'Check the selected tests, stay and room category.'}, {status:400});
+    }
     const included = Array.isArray(includedTests)
       ? includedTests.filter((i) => Number.isInteger(i) && i >= 0 && i <= maxTestIdx)
       : treatment.tests.map((_, i) => i);

@@ -1,0 +1,57 @@
+{
+  "checks": [
+    {
+      "route": "/",
+      "overflow": []
+    },
+    {
+      "route": "/hospitals?q=AIIMS",
+      "overflow": []
+    },
+    {
+      "route": "/hospitals/aiims-new-delhi",
+      "overflow": []
+    },
+    {
+      "route": "/rankings",
+      "overflow": []
+    },
+    {
+      "route": "/recommendations",
+      "overflow": []
+    },
+    {
+      "route": "/cost-estimator",
+      "overflow": []
+    },
+    {
+      "route": "/compare",
+      "overflow": []
+    },
+    {
+      "route": "/hospitals?saved=1",
+      "overflow": []
+    },
+    {
+      "route": "/emergency",
+      "overflow": []
+    },
+    {
+      "route": "/about",
+      "overflow": []
+    },
+    {
+      "route": "/contact",
+      "overflow": []
+    },
+    {
+      "route": "/privacy",
+      "overflow": []
+    },
+    {
+      "route": "/disclaimer",
+      "overflow": []
+    }
+  ],
+  "errors": []
+}

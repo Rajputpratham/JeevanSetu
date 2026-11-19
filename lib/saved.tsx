@@ -26,7 +26,7 @@ export function SavedProvider({ children }: { children: ReactNode }) {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          setSavedIds(parsed.filter((x) => typeof x === 'string'));
+          setSavedIds(Array.from(new Set(parsed.filter((x) => typeof x === 'string'))));
         }
       }
     } catch { /* ignore */ }

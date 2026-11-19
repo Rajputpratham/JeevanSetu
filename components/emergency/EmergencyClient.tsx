@@ -34,6 +34,7 @@ export default function EmergencyClient() {
   const [verifiedOnly, setVerifiedOnly] = useState(true);
   const [offlineFallbackUsed, setOfflineFallbackUsed] = useState(false);
   const [manualQuery, setManualQuery] = useState('');
+  const [placeError,setPlaceError] = useState(false);
   const [manualBusy, setManualBusy] = useState(false);
 
   /**
@@ -81,7 +82,8 @@ export default function EmergencyClient() {
 
   const applyManualOrigin = async () => {
     const q = manualQuery.trim();
-    if (q.length < 2) return;
+    setPlaceError(false);
+    if (q.length < 2) {setPlaceError(true);return;}
     setManualBusy(true);
     try {
       const res = await fetch(`/api/geocode?q=${encodeURIComponent(q)}&lang=${encodeURIComponent(lang)}`);
@@ -89,9 +91,9 @@ export default function EmergencyClient() {
       if (data?.results?.[0]) {
         setManual(data.results[0].lat, data.results[0].lng, data.results[0].label, 'manual');
         setManualQuery('');
-      }
+      } else setPlaceError(true);
     } catch {
-      // ignore
+      setPlaceError(true);
     } finally {
       setManualBusy(false);
     }
@@ -179,6 +181,7 @@ export default function EmergencyClient() {
                 </button>
               </div>
 
+              {placeError && <p role="alert" className="mt-2 text-sm text-white">{t('manualNoMatchError')}</p>}
               {errorCode && (
                 <p role="alert" className="mt-2 text-xs text-amber-200 font-semibold">
                   Location service unavailable or denied — enter your locality or pick a city below:
@@ -333,7 +336,7 @@ export default function EmergencyClient() {
             >
               <AlertOctagon className="text-amber-700 shrink-0 mt-0.5" size={18} />
               <p>
-                Network API unavailable — displaying built-in offline emergency directory and local road/ETA estimates. Call <strong>112</strong> immediately if urgent.
+                {lang === 'hi' ? 'यह निर्देशिका लाइव नहीं है। सड़क दूरी और पहुँचने का समय उपलब्ध नहीं हैं। आपात स्थिति में 112 पर कॉल करें।' : 'Built-in directory, not live availability. Driving distances and arrival times are unavailable. In an emergency, call 112.'}
               </p>
             </div>
           )}
@@ -390,7 +393,7 @@ export default function EmergencyClient() {
                             className="max-w-[110px] text-[11px] font-bold leading-tight text-amber-800"
                             data-testid={`em-distance-unavailable-${h.id}`}
                           >
-                            {hasLocation ? ds.distanceUnavailable : ls.notSet}
+                            {hasLocation ? ds.distanceUnavailable : "—"}
                           </p>
                         )}
                       </div>
@@ -416,12 +419,7 @@ export default function EmergencyClient() {
                           {h.phone}
                         </a>
                       ) : (
-                        <a
-                          href="tel:104"
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 text-slate-700 font-semibold px-3 py-2.5 text-xs min-h-[44px]"
-                        >
-                          {t('notListedCall104')}
-                        </a>
+                        <span className="text-sm text-slate-600">{t('notListedCall104')}</span>
                       )}
                       <a
                         href={directionsUrl(

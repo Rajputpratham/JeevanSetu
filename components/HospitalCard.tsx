@@ -16,7 +16,7 @@ import { useCompare } from '@/lib/compare';
 import { useSavedHospitals } from '@/lib/saved';
 import { useUserLocation } from '@/lib/useLocation';
 import { useLang, DictKey } from '@/lib/i18n';
-import { tSpeciality } from '@/lib/i18n-data';
+import { tFacility, tSpeciality } from '@/lib/i18n-data';
 
 export type EnrichedHospital = Hospital & {
   /** Google Routes driving distance in km. null = unknown (never guessed). */
@@ -211,6 +211,7 @@ export default function HospitalCard({
         )}
       </div>
 
+      {hospital.facilities.length > 0 && <p className="mt-2 text-xs text-slate-600">{hospital.facilities.slice(0,3).map(f => tFacility(f,lang)).join(' · ')}</p>}
       <div
         className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3"
         onClick={(e) => e.stopPropagation()}
@@ -287,6 +288,7 @@ export default function HospitalCard({
 
           <button
             type="button"
+            disabled={full && !inCompare}
             onClick={() => toggle(hospital.id)}
             aria-pressed={inCompare}
             title={

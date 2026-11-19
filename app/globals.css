@@ -93,3 +93,26 @@ html[dir="rtl"] a[href^="tel:"] {
 @media (max-height: 640px) {
   [data-testid='assistant-panel'] { max-height: calc(100dvh - 0.5rem); }
 }
+
+.care-hero { background: #eaf0e4; border-bottom: 1px solid #cbd8c8; }
+.care-kicker { display:flex;align-items:center;gap:.65rem;color:#28533e;font-size:.72rem;letter-spacing:.16em;text-transform:uppercase;font-weight:750; }
+.care-kicker span { width:2rem;height:2px;background:#a76d38; }
+.care-headline { font: 500 clamp(3rem,5.2vw,4.8rem)/1.04 Georgia,serif;letter-spacing:-.045em;color:#143d2c; }
+.care-headline em { color:#467559; }
+.care-portrait { border-radius: 5rem 1rem 5rem 1rem; background:#cadbc6; }
+:focus-visible, .btn:focus-visible { outline:3px solid #986510 !important;outline-offset:3px; }
+@media(max-width:639px){.care-portrait{border-radius:2rem .75rem}.care-portrait img{max-height:205px}.care-headline{font-size:3rem}}
+
+@media(max-width:639px){.header-logo svg{width:32px;height:32px}.header-logo a{gap:.35rem}.header-logo .text-xl{font-size:1rem}}
+@media(max-width:370px){.header-logo a>span{display:none}}
+
+@media print { main header {display:block!important} main table {min-width:0!important;font-size:9pt} main tr {break-inside:avoid} main .overflow-x-auto {overflow:visible!important} }
+
+@media print {
+  .comparison-sheet {min-width:0!important;font-size:9pt}
+  .comparison-sheet>div {padding:.35rem;overflow-wrap:anywhere;color:#142a21!important;background:white!important;border:1px solid #ddd;break-inside:avoid}
+  .comparison-sheet .text-brand-200 {color:#354b41!important}
+  .comparison-sheet.compare-1 {grid-template-columns:1fr 2fr!important}
+  .comparison-sheet.compare-2 {grid-template-columns:1fr repeat(2,1.6fr)!important}
+  .comparison-sheet.compare-3 {grid-template-columns:1fr repeat(3,1.3fr)!important}
+}

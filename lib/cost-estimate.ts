@@ -47,10 +47,10 @@ export interface EstimateResult {
 }
 
 export const ESTIMATE_DISCLAIMER =
-  'These are indicative ranges from public references, not a quotation. Actual bills depend on the city, hospital, room type, complications and length of stay. Government hospitals are often far cheaper — some services (e.g., deliveries under JSY, dialysis under PMNDP, cataract surgery) are free for eligible patients. Always ask the hospital for a written estimate.';
+  'These are indicative ranges from public references, not a quotation. Actual bills depend on the city, hospital, room type, complications and length of stay. Scheme coverage is not included or guaranteed. Always ask the hospital for a written estimate.';
 
 export const ESTIMATE_DISCLAIMER_HI =
-  'ये सार्वजनिक संदर्भों पर आधारित अनुमानित सीमाएं हैं, कोई पक्का कोटेशन नहीं। वास्तविक बिल शहर, अस्पताल, कमरे की श्रेणी, जटिलताओं और भर्ती रहने के दिनों पर निर्भर करता है। सरकारी अस्पताल अक्सर बहुत सस्ते होते हैं — कुछ सेवाएं (जैसे JSY के तहत प्रसव, PMNDP के तहत डायलिसिस, मोतियाबिंद सर्जरी) पात्र मरीजों के लिए मुफ़्त हैं। अस्पताल से हमेशा लिखित अनुमान मांगें।';
+  'ये सार्वजनिक संदर्भों पर आधारित अनुमानित सीमाएं हैं, कोई पक्का कोटेशन नहीं। वास्तविक बिल शहर, अस्पताल, कमरे की श्रेणी, जटिलताओं और भर्ती रहने के दिनों पर निर्भर करता है। इस अनुमान से किसी योजना का लाभ तय नहीं होता। अस्पताल से हमेशा लिखित अनुमान मांगें।';
 
 export function estimateTreatment(
   treatment: Treatment,
@@ -84,7 +84,7 @@ export function estimateTreatment(
       govt: treatment.procedure.govt,
       private: treatment.procedure.private,
     });
-  } else {
+  } else if (treatment.id === 'chemotherapy') {
     unavailable.push(procLabel);
     lines.push({
       label: procLabel,

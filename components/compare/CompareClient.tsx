@@ -106,9 +106,9 @@ export default function CompareClient() {
   }, [full]);
 
   const tryAdd = (id: string) => {
-    const ok = add(id);
-    if (!ok) setNotice(true);
+    if (full && !ids.includes(id)) setNotice(true);
     else {
+      add(id);
       setQuery('');
       setNotice(false);
     }
@@ -392,7 +392,7 @@ export default function CompareClient() {
                     updateOriginFromQuery();
                   }
                 }}
-                placeholder="Change starting place (e.g. Pusa Road, Gurugram, Mumbai)…"
+                placeholder={lang === 'hi' ? 'प्रस्थान स्थान बदलें (जैसे गुरुग्राम)…' : 'Change starting place (e.g. Gurugram)…'}
                 className="input !py-2.5 !text-sm"
               />
               <button
@@ -400,7 +400,7 @@ export default function CompareClient() {
                 onClick={updateOriginFromQuery}
                 disabled={originBusy}
                 className="btn-secondary !px-3.5 !py-2.5 !text-xs"
-                aria-label="Update starting location"
+                aria-label={lang === 'hi' ? 'प्रस्थान स्थान बदलें' : 'Update starting location'}
               >
                 {originBusy ? <Loader2 size={16} className="animate-spin" /> : <MapPin size={16} />}
               </button>
@@ -463,9 +463,9 @@ export default function CompareClient() {
 
       {/* Comparison table */}
       {selected.length > 0 && (
-        <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
+        <div role="region" aria-label={t('sideBySide')} tabIndex={0} className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-card">
           <div
-            className="min-w-[740px] grid"
+            className={`comparison-sheet compare-${selected.length} min-w-[740px] grid`}
             style={{ gridTemplateColumns: `165px repeat(${selected.length}, ${colClass})` }}
           >
             {/* Header row */}

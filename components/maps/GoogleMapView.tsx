@@ -326,12 +326,9 @@ export default function GoogleMapView({
         role="status"
         data-testid="google-maps-unavailable"
       >
-        <p className="text-sm font-bold text-brand-900">Google Maps is not configured</p>
+        <p className="text-sm font-bold text-brand-900">Map preview unavailable</p>
         <p className="max-w-md text-xs text-slate-600">
-          Add <code className="rounded bg-white px-1">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> (a
-          referrer-restricted browser key) to render live Google Maps. Hospital lists, distances and
-          directions still work, but no interactive Google map is shown rather than substituting a
-          different map provider.
+          Use the directions link to open Google Maps separately.
         </p>
       </div>
     );
@@ -341,7 +338,7 @@ export default function GoogleMapView({
     return (
       <div className={`flex items-center justify-center rounded-2xl border border-amber-200 bg-amber-50 p-6 text-center ${className}`} role="alert">
         <p className="text-sm font-semibold text-amber-900">
-          Google Maps could not load. Check the browser key’s referrer restrictions and enabled APIs.
+          Google Maps could not load. Use the hospital’s directions link instead.
         </p>
       </div>
     );

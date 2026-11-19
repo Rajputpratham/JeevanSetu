@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HOSPITALS, ALL_SPECIALITIES } from '@/data/hospitals';
+import { classifyIntent } from '@/lib/assistant/intent';
 import { recommendHospitals, specialityForProblem } from '@/lib/recommend';
 import { isValidLang } from '@/lib/lang-meta';
 import { getTravelSnapshot } from '@/lib/travel';
@@ -15,6 +16,7 @@ export async function GET(request: NextRequest) {
     const langRaw = sp.get('lang') ?? 'en';
     const lang = isValidLang(langRaw) ? langRaw : 'en';
     const problem = (sp.get('problem') ?? '').trim();
+    if (problem && classifyIntent(problem).emergency) return NextResponse.json({emergency:true, call:'112', source:'https://112.gov.in/', results:[]});
     let speciality = sp.get('speciality') ?? '';
     if (!speciality && problem) speciality = specialityForProblem(problem) ?? '';
 
@@ -33,6 +35,7 @@ export async function GET(request: NextRequest) {
 
     const typePreference = (sp.get('type') ?? 'any') as 'any' | 'government' | 'private';
     const budget = (sp.get('budget') ?? 'any') as 'any' | 'low' | 'medium' | 'high';
+    if (!['any','government','private'].includes(typePreference) || !['any','low','medium','high'].includes(budget)) return NextResponse.json({error:'Invalid preference'}, {status:400});
     const facilitiesWanted = (sp.get('facilities') ?? '').split(',').map((s) => s.trim()).filter(Boolean);
     const lat = parseFloat(sp.get('lat') ?? '');
     const lng = parseFloat(sp.get('lng') ?? '');

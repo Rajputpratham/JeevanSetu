@@ -464,7 +464,7 @@ export async function getHospitalRatings(hospitalId: string): Promise<ToolResult
       imdbScore: community.imdbScaleScore,
       reviewCount: community.eligibleCount,
       distribution: community.distribution ?? null,
-      googleStatus: process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY ? 'connected' : 'awaiting-api-key',
+      googleStatus: process.env.GOOGLE_PLACES_API_KEY || process.env.GOOGLE_MAPS_API_KEY ? 'unknown' : 'awaiting-api-key',
       googleRating: null,
       googleCount: null,
       note:

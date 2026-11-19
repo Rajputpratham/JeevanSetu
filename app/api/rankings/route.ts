@@ -55,7 +55,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       count: ranked.length,
       methodology:
-        'Composite Score (0–100) = Verified Facilities (30) + Specialities (25) + Verified 24×7 Emergency (15) + Public Affordability (15) + IMDb-style Bayesian Community Score (15). Not a clinical mortality/outcome ranking.',
+        'Composite Score (0–100) = Listed facilities (30) + Specialities (25) + Verified 24×7 Emergency (15) + Public Affordability (15) + IMDb-style Bayesian Community Score (15). Without eligible reports, the community component uses a statistical prior, not patient feedback. This is not a clinical outcomes ranking.',
       results: ranked.map((entry) => ({
         ...entry,
         roadKm: legs[entry.hospital.id]?.distanceKm ?? null,

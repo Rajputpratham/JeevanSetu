@@ -49,17 +49,8 @@ interface Turn {
   error?: boolean;
 }
 
-interface VoiceTokenResponse {
-  available: boolean;
-  token?: string;
-  wsUrl?: string;
-  model?: string;
-  reason?: string;
-  message?: string;
-  fallback?: string;
-}
 
-export default function AssistantWidget() {
+export default function AssistantWidget({initiallyOpen = false}: {initiallyOpen?:boolean}) {
   const { t, lang, setLang } = useLang();
   const strings = assistantStrings(lang);
   const ds = distanceStrings(lang);
@@ -67,7 +58,7 @@ export default function AssistantWidget() {
   const locale = SPEECH_LOCALES[lang] ?? meta.speechLocale;
   const { location, hasLocation } = useUserLocation();
 
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(initiallyOpen);
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [status, setStatus] = useState<AssistantStatus>('ready');
@@ -75,7 +66,6 @@ export default function AssistantWidget() {
   const [muted, setMuted] = useState(false);
   const [voiceMode, setVoiceMode] = useState(false);
   const [voiceNote, setVoiceNote] = useState<string | null>(null);
-  const [liveSession, setLiveSession] = useState<'idle' | 'active' | 'unavailable'>('idle');
   const [interim, setInterim] = useState('');
   const [showLangPicker, setShowLangPicker] = useState(false);
 
@@ -154,7 +144,7 @@ export default function AssistantWidget() {
         const res = await fetch('/api/assistant', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(25000)]),
           body: JSON.stringify({
             message: trimmed,
             lang,
@@ -288,44 +278,13 @@ export default function AssistantWidget() {
     setStatus('ready');
   }, []);
 
-  /** Voice conversation: try Gemini Live, otherwise verified speech + Gemini text. */
-  const startVoiceConversation = useCallback(async () => {
-    if (!voiceSupported) {
-      setVoiceNote(strings.voiceUnsupported);
-      return;
-    }
+  // Browser recognition and synthesis are the actual transports. Minting a token
+  // is not a live audio connection, so do not report a streaming session.
+  const startVoiceConversation = useCallback(() => {
+    if (!voiceSupported || !voiceVerifiedForLang) { setVoiceNote(strings.voiceUnsupported); return; }
     setVoiceMode(true);
-    setStatus('connecting');
-    setVoiceNote(null);
-    try {
-      const res = await fetch('/api/assistant/voice-token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lang }),
-      });
-      const data = (await res.json()) as VoiceTokenResponse;
-      if (!data.available) {
-        setLiveSession('unavailable');
-        setVoiceNote(
-          data.message ??
-            'Live voice streaming is unavailable, so I will use your device’s speech recognition and read replies aloud.',
-        );
-        setStatus('ready');
-        startListening();
-        return;
-      }
-      // A token was minted: the Live session is genuinely available.
-      setLiveSession('active');
-      setVoiceNote('Gemini Live audio session ready.');
-      setStatus('ready');
-      startListening();
-    } catch {
-      setLiveSession('unavailable');
-      setStatus('ready');
-      setVoiceNote('Live voice is unavailable right now. Falling back to speech recognition with spoken replies.');
-      startListening();
-    }
-  }, [voiceSupported, strings.voiceUnsupported, lang, startListening]);
+    startListening();
+  }, [voiceSupported, voiceVerifiedForLang, strings.voiceUnsupported, startListening]);
 
   const endConversation = useCallback(() => {
     stopSpeaking();
@@ -334,8 +293,18 @@ export default function AssistantWidget() {
     setVoiceMode(false);
     setStatus('ready');
     setInterim('');
-    setLiveSession('idle');
+
   }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    document.querySelector<HTMLButtonElement>('[data-testid="assistant-close"]')?.focus();
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setOpen(false); endConversation(); }
+    };
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('keydown', escape); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>('[data-testid="assistant-open-btn"]')?.focus()); };
+  }, [open, endConversation]);
 
   const onSubmit = (e: FormEvent) => {
     e.preventDefault();
@@ -385,7 +354,7 @@ export default function AssistantWidget() {
           className="flex items-center gap-2.5 rounded-full bg-brand-800 hover:bg-brand-900 text-white font-extrabold px-5 py-3.5 shadow-2xl border-2 border-white transition-transform hover:scale-[1.02] min-h-[52px]"
         >
           <Sparkles size={22} aria-hidden="true" />
-          <span className="text-sm">{strings.title}</span>
+          <span className="hidden sm:inline text-sm">{strings.title}</span>
         </button>
       ) : (
         <section
@@ -638,10 +607,10 @@ export default function AssistantWidget() {
                 )}
 
                 {/* Honest source note */}
+                {turn.error && <button className="btn-ghost text-xs" onClick={() => { const last = turns.slice(0, turns.indexOf(turn)).reverse().find(msg => msg.role === "user"); if (last) void callAssistant(last.text); }}>{t("retryBtn")}</button>}
                 {turn.response && turn.response.groundingMode === 'deterministic-grounded' && (
                   <p className="mt-1 text-[10px] text-amber-800 px-1">
-                    {turn.response.blockers[0] ??
-                      'Answered from JeevanSetu’s grounded rule engine (Gemini unavailable).'}
+                    {lang === 'hi' ? 'यह उत्तर निर्देशिका के नियमों पर आधारित है, लाइव जानकारी पर नहीं।' : 'Directory guide · Rule-based answer, not live advice.'}
                   </p>
                 )}
                 {turn.response?.groundingMode === 'gemini-grounded' && (
@@ -707,7 +676,7 @@ export default function AssistantWidget() {
                   voiceMode ? 'bg-emerald-700 text-white' : 'bg-emerald-50 text-emerald-900 hover:bg-emerald-100 disabled:opacity-40'
                 }`}
               >
-                {liveSession === 'active' ? <Sparkles size={15} /> : <Volume2 size={15} />}
+                <Volume2 size={15}/>
                 <span className="hidden sm:inline">{voiceMode ? strings.end : 'Talk'}</span>
               </button>
 

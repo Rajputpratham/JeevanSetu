@@ -3,7 +3,7 @@ import './globals.css';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import SkipLink from '@/components/SkipLink';
-import AssistantWidget from '@/components/assistant/AssistantWidget';
+import AssistantLauncher from '@/components/assistant/AssistantLauncher';
 import { LanguageProvider } from '@/lib/i18n';
 import { LocationProvider } from '@/lib/useLocation';
 import { CompareProvider } from '@/lib/compare';
@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     template: '%s | JeevanSetu',
   },
   description:
-    'JeevanSetu helps families across India find nearby hospitals with verified Google driving distances, compare facilities and transparent community ratings, estimate treatment costs in ₹, reach 24×7 emergency care and ask the JeevanSetu AI Assistant — across 11 languages.',
+    'JeevanSetu helps families across India find nearby hospitals without sharing their location, compare facilities, estimate treatment costs in ₹ and reach emergency assistance.',
   keywords: [
     'hospitals near me',
     'government hospital',
@@ -33,7 +33,7 @@ export const metadata: Metadata = {
     siteName: 'JeevanSetu',
     title: 'JeevanSetu — The Right Hospital, Closer to You',
     description:
-      'Find nearby hospitals, view transparent community ratings, estimate treatment costs and reach 24×7 emergency support in 11 languages.',
+      'Find nearby hospitals, view transparent community ratings, estimate treatment costs and reach 24×7 emergency support.',
   },
   robots: { index: true, follow: true },
 };
@@ -58,7 +58,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                   {children}
                 </main>
                 <Footer />
-                <AssistantWidget />
+                <AssistantLauncher />
               </SavedProvider>
             </CompareProvider>
           </LocationProvider>
