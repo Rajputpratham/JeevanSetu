@@ -383,9 +383,11 @@ export default function DiscoveryClient({
             onClick={() => setFiltersOpen(!filtersOpen)}
             className="btn-ghost !text-sm"
             aria-expanded={filtersOpen}
+            aria-pressed={hasActiveFilters}
             aria-controls="filter-panel"
           >
-            <SlidersHorizontal size={18} /> {t('filtersBtn')} {hasActiveFilters && '•'}
+            <SlidersHorizontal size={18} />
+            {t('filtersBtn')}
           </button>
           <div
             className="flex rounded-xl border border-slate-200 overflow-hidden text-sm font-bold"

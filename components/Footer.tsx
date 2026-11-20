@@ -17,7 +17,7 @@ export default function Footer() {
             </p>
           </div>
           <nav aria-label={t('footerPlatformNavAria')}>
-            <h3 className="text-white font-bold text-sm uppercase tracking-wider">{t('footerColPlatform')}</h3>
+            <h2 className="text-white font-bold text-sm uppercase tracking-wider">{t('footerColPlatform')}</h2>
             <ul className="mt-3 space-y-2 text-sm">
               <li><Link href="/hospitals" className="hover:text-white hover:underline">{t('footerLinkFind')}</Link></li>
               <li><Link href="/rankings" className="hover:text-white hover:underline">{t('navRankings')}</Link></li>
@@ -28,7 +28,7 @@ export default function Footer() {
             </ul>
           </nav>
           <nav aria-label={t('footerOrgNavAria')}>
-            <h3 className="text-white font-bold text-sm uppercase tracking-wider">{t('footerColAbout')}</h3>
+            <h2 className="text-white font-bold text-sm uppercase tracking-wider">{t('footerColAbout')}</h2>
             <ul className="mt-3 space-y-2 text-sm">
               <li><Link href="/about" className="hover:text-white hover:underline">{t('footerAbout')}</Link></li>
               <li><Link href="/contact" className="hover:text-white hover:underline">{t('footerContact')}</Link></li>
@@ -37,7 +37,7 @@ export default function Footer() {
             </ul>
           </nav>
           <div>
-            <h3 className="text-white font-bold text-sm uppercase tracking-wider">{t('footerEmergency')}</h3>
+            <h2 className="text-white font-bold text-sm uppercase tracking-wider">{t('footerEmergency')}</h2>
             <a href="tel:112" className="mt-3 flex items-center gap-3 bg-red-700 hover:bg-red-600 rounded-2xl px-4 py-3">
               <PhoneCall size={26} strokeWidth={2.5} />
               <span><span className="block text-2xl font-extrabold leading-none">112</span>
