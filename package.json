@@ -9,7 +9,12 @@
     "start": "next start -H 0.0.0.0 -p 3000",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "qa:browser": "node scripts/browser-qa.mjs",
+    "qa:failures": "node scripts/browser-failures.mjs",
+    "qa:history": "node scripts/browser-history.mjs",
+    "qa": "npm run qa:browser && npm run qa:failures && npm run qa:history"
   },
   "dependencies": {
     "lucide-react": "^1.73.0",

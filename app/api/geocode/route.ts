@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchIndianLocalities } from '@/data/localities';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,20 @@ function normalisePincode(raw: string): string | null {
   return /^[1-9][0-9]{5}$/.test(digits) ? digits : null;
 }
 
+/**
+ * GET /api/geocode?q=&lang=
+ *
+ * Proxies Google Geocoding / OpenStreetMap Nominatim, both of which are billed
+ * or fairness-limited upstream, so the route is rate limited per caller.
+ */
 export async function GET(request: NextRequest) {
+  const limited = enforceRateLimit(
+    request,
+    'geocode',
+    'Too many address searches. Please wait a moment before searching again.',
+  );
+  if (limited) return limited;
+
   const sp = request.nextUrl.searchParams;
   const q = (sp.get('q') ?? '').trim();
   const lang = (sp.get('lang') ?? 'en').trim().slice(0, 5);

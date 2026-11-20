@@ -7,7 +7,8 @@ import {
   getAllReviews,
   getReviewsForHospital,
 } from '@/lib/ratings';
-import { checkRateLimit, moderateReviewInput } from '@/lib/moderation';
+import { moderateReviewInput } from '@/lib/moderation';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,17 +47,12 @@ export function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const clientIp =
-      request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-      request.headers.get('x-real-ip') ||
-      'anonymous-client';
-
-    if (!checkRateLimit(clientIp)) {
-      return NextResponse.json(
-        { error: 'Too many review submissions. Please wait a minute before submitting again.' },
-        { status: 429 },
-      );
-    }
+    const limited = enforceRateLimit(
+      request,
+      'reviews',
+      'Too many review submissions. Please wait a minute before submitting again.',
+    );
+    if (limited) return limited;
 
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
