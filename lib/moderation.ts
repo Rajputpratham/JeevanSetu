@@ -21,18 +21,11 @@ const UNSUPPORTED_MEDICAL_OR_DEFAMATION_PATTERNS = [
 
 const PHONE_PII_PATTERN = /\b(?:\+91[\s-]?)?[6-9]\d{9}\b/g;
 
-// Simple sliding rate-limit window per IP/fingerprint key
-const submissionTimestamps = new Map<string, number[]>();
-
-export function checkRateLimit(clientKey: string, now = Date.now()): boolean {
-  const windowMs = 60_000; // 1 minute
-  const maxPerMinute = 4;
-  const history = (submissionTimestamps.get(clientKey) ?? []).filter((ts) => now - ts < windowMs);
-  if (history.length >= maxPerMinute) return false;
-  history.push(now);
-  submissionTimestamps.set(clientKey, history);
-  return true;
-}
+/**
+ * NOTE: rate limiting for review submissions now lives in `lib/rate-limit.ts`
+ * (`RATE_LIMITS.reviews`, 4 per minute per IP) so every public API route shares
+ * one implementation. This module stays focused on content moderation.
+ */
 
 export function moderateReviewInput(
   input: {

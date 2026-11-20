@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isValidLang } from '@/lib/lang-meta';
 import { runAssistantTurn, type AssistantRequest } from '@/lib/assistant/orchestrator';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 30;
@@ -11,9 +12,18 @@ export const maxDuration = 30;
  * Replaces the old /api/chat grounded-retrieval bot. Behaviour is governed by
  * `lib/assistant/*`: intent gating (greetings never trigger hospital tools),
  * Google-Routes-only distance figures, honest degradation when Gemini is down.
+ *
+ * Rate limited per IP because every turn can call the paid Gemini API.
  */
 export async function POST(request: NextRequest) {
   try {
+    const limited = enforceRateLimit(
+      request,
+      'assistant',
+      'Too many assistant requests. Please wait a minute before asking again.',
+    );
+    if (limited) return limited;
+
     const body = await request.json().catch(() => null);
     if (!body || typeof body !== 'object') {
       return NextResponse.json({ error: 'Invalid request body.', code: 'BAD_BODY' }, { status: 400 });

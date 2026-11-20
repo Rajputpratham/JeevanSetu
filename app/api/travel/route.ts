@@ -3,7 +3,8 @@ import { HOSPITALS } from '@/data/hospitals';
 import { resolveHospitalGeo } from '@/data/hospital-locations';
 import { getTravelSnapshot, hasServerMapsKey } from '@/lib/travel';
 import { cached, travelCacheKey } from '@/lib/travel-cache';
-import { isValidLang } from '@/lib/lang-meta';
+import { getLangMeta, isValidLang } from '@/lib/lang-meta';
+import { enforceRateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,8 +16,17 @@ const CACHE_TTL_MS = 60_000;
  * cards, map, comparison, emergency list and assistant all render from.
  *
  * Query: lat, lng, source, accuracy, label, ids (comma separated), lang
+ *
+ * Rate limited per IP: each cache miss fans out to the billed Google Routes API.
  */
 export async function GET(request: NextRequest) {
+  const limited = enforceRateLimit(
+    request,
+    'travel',
+    'Too many distance requests. Please wait a moment before retrying.',
+  );
+  if (limited) return limited;
+
   const sp = request.nextUrl.searchParams;
   const lat = parseFloat(sp.get('lat') ?? '');
   const lng = parseFloat(sp.get('lng') ?? '');
@@ -65,7 +75,9 @@ export async function GET(request: NextRequest) {
           originLabel: label,
           originAccuracyM: Number.isFinite(accuracy) ? accuracy : null,
           hospitals: targets,
-          language: lang === 'en' ? 'en-IN' : 'en-IN',
+          // Google expects a BCP-47 code; `speechLocale` already maps every
+          // supported language to its Indian regional variant (hi-IN, ta-IN, …).
+          language: getLangMeta(lang).speechLocale,
         }),
     );
 
