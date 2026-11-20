@@ -13,7 +13,7 @@ No sign-up. Works on low-end Android phones.
 
 ## Languages
 
-The whole UI — navigation, filters, hospital pages, the cost estimator and the AI assistant — is available in **11 languages**: English (EN), Hindi (हिन्दी), Bengali (বাংলা), Telugu (తెలుగు), Marathi (मराठी), Tamil (தமிழ்), Gujarati (ગુજરાતી), Urdu (اردو, right-to-left), Kannada (ಕನ್ನಡ), Odia (ଓଡ଼ିଆ) and Malayalam (മലയാളം).
+The core UI — navigation, filters, hospital pages, the cost estimator and the AI assistant — is available in **11 languages**: English (EN), Hindi (हिन्दी), Bengali (বাংলা), Telugu (తెలుగు), Marathi (मराठी), Tamil (தமிழ்), Gujarati (ગુજરાતી), Urdu (اردو, right-to-left), Kannada (ಕನ್ನಡ), Odia (ଓଡ଼ିଆ) and Malayalam (മലയാളം).
 
 Language codes, native names, script direction and speech-recognition locales live in `lib/lang-meta.ts`; translations are in `lib/i18n-data.ts` + `lib/languages-extra.ts`. The selected language is applied to Google Routes requests too, so road names and traffic phrases come back in the user's language (`/api/travel?lang=ta` → `languageCode: ta-IN`).
 
@@ -36,7 +36,7 @@ Every hospital page accepts community reviews with per-aspect ratings (doctor ca
 
 ## Tech stack
 
-Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · Google Maps / Places / Routes (optional; see `.env.example`) · Gemini (optional) · data shipped as typed in-repo datasets (`data/hospitals.ts`, `data/treatments.ts`) behind server-side API routes (`/api/hospitals`, `/api/recommendations`, `/api/estimate`, `/api/emergency`, `/api/travel`, `/api/assistant`, …).
+Next.js 15 (App Router) · React 19 · TypeScript · Tailwind CSS · OSRM/Nominatim (finder) · Google Maps / Places / Routes (optional; see `.env.example`) · Gemini (optional) · data shipped as typed in-repo datasets (`data/hospitals.ts`, `data/treatments.ts`) behind server-side API routes (`/api/hospitals`, `/api/recommendations`, `/api/estimate`, `/api/emergency`, `/api/travel`, `/api/assistant`, …).
 
 ### API limits and caching
 
@@ -63,6 +63,33 @@ npm start          # serve production build
 
 Everything is optional, including API keys: without them the app still runs and tells you what is missing (see `.env.example`).
 
+## Key-free hospital finder distances
+
+1. Run `npm ci && npm run dev`, then open **http://localhost:3000/hospitals**. Use HTTPS or localhost for browser geolocation. No API key is needed for driving estimates, manual lookup in local development, or the Directions link.
+2. Click **Use my location** (or a card’s **Enable**) and grant permission. Alternatively, submit a city or Indian pincode and confirm the matching place. No coordinates are sent to OSRM before either choice; the finder remembers the selected location for the browser session only. **Clear location** removes it. A city/pincode only gives an approximate starting point.
+3. **Nearest first** uses road kilometers where available and labeled straight-line kilometers otherwise; unknown distances go last. The radius uses the same values and keeps hospitals with unknown distances visible. Straight-line fallback never shows a drive time. Retry a failed route from its card. The Google Maps Directions link stays available regardless of the routing service.
+
+`/hospitals` fetches directory filters and community scores from `/api/hospitals` without an origin, then batches verified destinations into OSRM Table requests in the browser. Estimates exclude live traffic. The optional Google map still requires a Maps browser key; the finder does not request a Google route polyline. Other surfaces (such as Compare and hospital details) still have their existing Google travel integrations.
+
+**The public OSRM demo is for development/prototyping only. It has no production service guarantee. Replace it with a self-hosted OSRM instance before production use**, using `NEXT_PUBLIC_OSRM_BASE_URL` and an HTTPS endpoint that allows the app’s browser origin. Configure a driving profile that returns **both** distance and duration annotations in the Table API.
+
+### Hospital coordinates and one-time geocoding
+
+`data/hospitals.ts` publishes typed `lat`/`lng` numbers from the canonical registry, `data/hospital-locations.ts`. The finder accepts verified entries with valid coordinates only. For example, `aiims-new-delhi` uses the existing verified **AIIMS main campus, Ansari Nagar, New Delhi** point, `lat: 28.5671, lng: 77.2089`; the registry documents the [campus/location cross-check](https://en.wikipedia.org/wiki/All_India_Institute_of_Medical_Sciences,_New_Delhi).
+
+**Read the [public Nominatim usage policy](https://operations.osmfoundation.org/policies/nominatim/) before running the script or enabling public manual lookup.** Public use must be low-volume and at most one request per second **across the application**, not per user. No autocomplete, scheduled bulk geocoding, or private addresses. Geocoding data is © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
+
+```bash
+# Dry run; no request for records with valid coordinates
+NOMINATIM_CONTACT='maintainer@example.org' node scripts/geocode.mjs
+# Write exact, unique hospital/PIN matches with OSM provenance to the registry
+NOMINATIM_CONTACT='maintainer@example.org' node scripts/geocode.mjs --write
+```
+
+Replace the example contact with a monitored email or contact URL. For a new listing without coordinates, leave its draft coordinates unset or invalid until they can be verified; the script reads the directory without requiring a build. Run this only as a small, one-off task, on one machine, separately from public manual lookups. It spaces request starts 1.1 seconds apart, caches responses locally in the ignored `.nominatim-geocode-cache.json`, reports ambiguous or unmatched records, and does not guess. Review the registry diff before committing.
+
+Manual lookup is server-proxied, cached and rate-limited in a single worker. The local dev server defaults to public Nominatim; a production build needs an explicit `NOMINATIM_SEARCH_URL` to enable manual lookup (no API key required for a self-hosted instance). On multiple workers or deployments, use a self-hosted geocoder or a provider-approved shared proxy. The in-process limiter cannot enforce an application-wide quota across workers or legacy geocoding endpoints.
+
 ## Verify
 
 ```bash
@@ -85,18 +112,18 @@ npx playwright install chromium   # once, if Playwright's browser is not present
 npm run dev                       # in another terminal; scripts target http://localhost:3000
 
 npm run qa:browser                # 65 responsive-viewport overflow checks + screenshots/docs/qa/layout.json
-npm run qa:failures               # denied/timed-out geolocation, manual origin, language switching, 320px nav
+npm run qa:failures               # location errors, manual origin, mocked OSRM, responsive cards, language switching
 npm run qa:history                # back/forward state, compare add/duplicate limits, print layout
 npm run qa                        # all three, in order
 ```
 
-`qa:failures` uses mock permissions and never submits a review or opens a call, mail or map app. Both scripts honour `CHROME_PATH` (existing Chromium binary) and `CHROME_ARGS` (JSON array of launch flags), so they work in sandboxes without Playwright's own browser download.
+`qa:failures` uses mock permissions and never submits a review or opens a call, mail or map app. The scripts honour `CHROME_PATH` (existing Chromium binary) and `CHROME_ARGS` (JSON array of launch flags), so they work in sandboxes without Playwright's own browser download.
 
 ## Honesty policy
 
 - Hospital names/addresses are from public listings. Verification status is shown per field: **Verified / Unverified / Not listed**.
 - Cost figures are indicative ranges compiled from public CGHS / PM-JAY / state-scheme / published-tariff references. They are **not quotes**. Missing pricing data is shown as “not available”, never invented.
-- Driving distance and ETA come only from the Google Routes API; when it is unavailable the UI says so instead of showing a straight-line guess as a road distance.
+- Finder driving estimates come from OSRM; other travel surfaces may use Google Routes. A straight-line measurement is always labeled and never presented as driving distance or time.
 - Google ratings/reviews are shown only when the Places API answers; otherwise the page links to Google Maps directly.
 - JeevanSetu is not medical advice. In an emergency call **112**.
 

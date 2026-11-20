@@ -2,24 +2,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  Search, Loader2, SlidersHorizontal, Map as MapIcon, List,
+  Search, SlidersHorizontal, Map as MapIcon, List,
   AlertCircle, Building2, Landmark, Siren, X, GitCompareArrows, Info,
-  Bookmark, Clock, Navigation, Route as RouteIcon,
+  Bookmark, Navigation, Route as RouteIcon,
 } from 'lucide-react';
-import { useUserLocation } from '@/lib/useLocation';
+import { useUserLocation } from '@/hooks/useUserLocation';
+import { useHospitalDistances } from '@/hooks/useHospitalDistances';
+import { formatDistance, isLatLng } from '@/lib/distance';
+import { resolveHospitalGeo } from '@/data/hospital-locations';
 import { ALL_SPECIALITIES } from '@/data/hospitals';
 import HospitalCard, { EnrichedHospital } from '@/components/HospitalCard';
 import MapPanel from '@/components/maps/MapPanel';
-import LocationControls from '@/components/LocationControls';
+import FinderLocationControls from '@/components/hospitals/FinderLocationControls';
 import VoiceSearchButton from '@/components/VoiceSearchButton';
 import { useLang } from '@/lib/i18n';
 import { tSpeciality } from '@/lib/i18n-data';
 import { useCompare } from '@/lib/compare';
 import { useSavedHospitals } from '@/lib/saved';
-import { formatDrivingKm, formatDuration, directionsUrl } from '@/lib/geo';
-import { distanceStrings, locationStrings } from '@/lib/ui-strings';
+import { directionsUrl } from '@/lib/geo';
+import { distanceStrings } from '@/lib/ui-strings';
 
-/** Shape returned by /api/route (Google Routes derived). */
+/** Legacy Google Routes payload still used by the hospital detail page. */
 export interface RouteDetailPayload {
   hospitalId: string;
   distanceKm: number | null;
@@ -65,7 +68,8 @@ export default function DiscoveryClient({
   const { t, lang } = useLang();
   const { ids: compareIds } = useCompare();
   const { savedIds } = useSavedHospitals();
-  const { location, errorCode, hasLocation } = useUserLocation();
+  const originControls = useUserLocation();
+  const { location } = originControls;
 
   const [q, setQ] = useState(initialQ);
   const [type, setType] = useState<'all' | 'government' | 'private'>(initialType);
@@ -76,65 +80,42 @@ export default function DiscoveryClient({
   const [sort, setSort] = useState<'distance' | 'rating' | 'name' | 'type'>(initialSort);
   const [showEmptyNotice, setShowEmptyNotice] = useState(initialEmpty && !initialQ && !initialSpeciality);
 
-  const [results, setResults] = useState<EnrichedHospital[] | null>(null);
-  const [fellBack, setFellBack] = useState(false);
+  const [directory, setDirectory] = useState<{ query: string; results: EnrichedHospital[] } | null>(null);
   const [listError, setListError] = useState(false);
   const [mobileView, setMobileView] = useState<'list' | 'map'>('list');
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [selectedHospitalId, setSelectedHospitalId] = useState<string | null>(null);
-  const [activeRoute, setActiveRoute] = useState<RouteDetailPayload | null>(null);
-  const [routeBusy, setRouteBusy] = useState(false);
   const [showTraffic, setShowTraffic] = useState(true);
-  const [distanceMeta, setDistanceMeta] = useState<{
-    source: string;
-    disclosure: { text: string; live: boolean };
-    blockers: string[];
-    computedAt: string;
-  } | null>(null);
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const directoryQuery = useMemo(() => {
+    const params = new URLSearchParams({ type, lang, unrestrictedRadius: '1' });
+    if (q.trim()) params.set('q', q.trim());
+    if (speciality) params.set('speciality', speciality);
+    if (emergencyOnly) params.set('emergency', '1');
+    return params.toString();
+  }, [type, lang, q, speciality, emergencyOnly]);
+  const results = directory?.query === directoryQuery ? directory.results : null;
 
   const pending = useRef<AbortController | null>(null);
   const fetchHospitals = useCallback(() => {
     pending.current?.abort();
     const controller = new AbortController();
     pending.current = controller;
-    const params = new URLSearchParams({
-      ...(hasLocation ? {lat: String(location.lat), lng: String(location.lng)} : {}),
-      source: location.source,
-      radius: String(savedOnly ? 1000 : radius),
-      type,
-      sort,
-      lang,
-    });
-    if (q.trim()) params.set('q', q.trim());
-    if (savedOnly) params.set('unrestrictedRadius','1');
-    if (speciality) params.set('speciality', speciality);
-    if (emergencyOnly) params.set('emergency', '1');
     setListError(false);
-    fetch(`/api/hospitals?${params}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) })
+    fetch(`/api/hospitals?${directoryQuery}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error('Request failed'))))
       .then((data) => {
-        setResults(data.results ?? []);
-        setFellBack(Boolean(data.fellBack));
-        setDistanceMeta({
-          source: data.distanceSource ?? 'unavailable',
-          disclosure: data.distanceDisclosure ?? { text: '', live: false },
-          blockers: data.blockers ?? [],
-          computedAt: data.travelComputedAt ?? '',
-        });
+        if (!controller.signal.aborted) setDirectory({ query: directoryQuery, results: data.results ?? [] });
       })
       .catch(() => { if (!controller.signal.aborted) setListError(true); });
-  }, [hasLocation, location.lat, location.lng, location.source, radius, savedOnly, type, speciality, emergencyOnly, q, sort, lang]);
+  }, [directoryQuery]);
 
-  // Debounced refetch on control change (preserves origin, selectedHospitalId, and filters across language switch!)
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(fetchHospitals, 180);
+    const timer = setTimeout(fetchHospitals, 180);
     return () => {
       pending.current?.abort();
-      if (debounceRef.current) clearTimeout(debounceRef.current);
+      clearTimeout(timer);
     };
   }, [fetchHospitals]);
 
@@ -175,55 +156,46 @@ export default function DiscoveryClient({
     window.history.replaceState(null, '', locationPath(search));
   }, [urlReady,q,type,speciality,emergencyOnly,savedOnly,radius,sort]);
 
-  const displayedResults = useMemo(() => {
+  const candidates = useMemo(() => {
     if (!results) return null;
-    if (!savedOnly) return results;
-    return results.filter((h) => savedIds.includes(h.id));
+    return savedOnly ? results.filter((h) => savedIds.includes(h.id)) : results;
   }, [results, savedOnly, savedIds]);
 
-  const selectedHospital = useMemo(
-    () => displayedResults?.find((h) => h.id === selectedHospitalId) ?? null,
-    [displayedResults, selectedHospitalId],
-  );
+  const destinations = useMemo(() => (candidates ?? []).map((hospital) => {
+    const geo = resolveHospitalGeo(hospital);
+    return geo.valid && geo.confidence === 'verified'
+      ? { id: hospital.id, lat: geo.lat, lng: geo.lng }
+      : { id: hospital.id };
+  }), [candidates]);
+  const verifiedIds = useMemo(() => new Set(destinations.filter((h) => h.lat !== undefined).map((h) => h.id)), [destinations]);
+  const { distances, retry } = useHospitalDistances(location, destinations);
+  const displayedResults = useMemo(() => {
+    if (!candidates) return null;
+    const km = (id: string) => distances.get(id)?.km ?? Infinity;
+    const nearest = (a: EnrichedHospital, b: EnrichedHospital) => km(a.id) - km(b.id) || 0;
+    const sorted = [...candidates].sort((a, b) => {
+      if (sort === 'name') return a.shortName.localeCompare(b.shortName);
+      if (sort === 'type') return a.type.localeCompare(b.type) || nearest(a, b);
+      if (sort === 'rating') return (b.communityScore ?? 0) - (a.communityScore ?? 0) || nearest(a, b);
+      return nearest(a, b);
+    });
+    const within = !savedOnly && radius < 500 && sorted.some((h) => km(h.id) <= radius);
+    // Keep unknown distances visible; we cannot tell whether they are in range.
+    return within ? sorted.filter((h) => km(h.id) <= radius || km(h.id) === Infinity) : sorted;
+  }, [candidates, distances, radius, savedOnly, sort]);
+  const fellBack = !savedOnly && radius < 500 && [...distances.values()].some((result) => result.km !== null) &&
+    ![...distances.values()].some((result) => result.km !== null && result.km <= radius);
+  const finderDistanceLabel = useCallback((id: string) => {
+    if (!verifiedIds.has(id)) return 'Location not available for this hospital.';
+    const result = distances.get(id);
+    if (!result) return location ? 'Calculating…' : 'Enable location to see distance';
+    return formatDistance(result) + (result.source === 'road' ? ' (estimated)' : '');
+  }, [distances, location, verifiedIds]);
+  const selectedHospital = displayedResults?.find((h) => h.id === selectedHospitalId);
+  const selectedDistance = selectedHospital ? distances.get(selectedHospital.id) : undefined;
+  const estimatesLoading = Boolean(location && destinations.some((h) => verifiedIds.has(h.id) && !distances.has(h.id)));
 
-  /**
-   * Route preview for the selected hospital.
-   *
-   * Requested by stable hospital id so the SERVER resolves the destination from
-   * the verified coordinate registry — the client can never pass a stale or
-   * wrong coordinate into a distance calculation. The `cancelled` flag discards
-   * out-of-order responses so an older route can never overwrite a newer one.
-   */
-  useEffect(() => {
-    if (!selectedHospital || !hasLocation || !Number.isFinite(location.lat)) {
-      setActiveRoute(null);
-      return;
-    }
-    let cancelled = false;
-    const controller = new AbortController();
-    setRouteBusy(true);
-    setActiveRoute(null);
-    fetch(
-      `/api/route?fromLat=${location.lat}&fromLng=${location.lng}&hospitalId=${encodeURIComponent(
-        selectedHospital.id,
-      )}&lang=${lang}`,
-      { signal: controller.signal },
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: RouteDetailPayload | null) => {
-        if (!cancelled) setActiveRoute(data);
-      })
-      .catch(() => {
-        if (!cancelled) setActiveRoute(null);
-      })
-      .finally(() => {
-        if (!cancelled) setRouteBusy(false);
-      });
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [selectedHospital, hasLocation, location.lat, location.lng, lang]);
+  useEffect(() => { setSelectedHospitalId(null); }, [location]);
 
   const handleSelectHospital = useCallback((hospitalId: string) => {
     setSelectedHospitalId(hospitalId);
@@ -244,7 +216,6 @@ export default function DiscoveryClient({
     setRadius(25);
     setSort('distance');
     setSelectedHospitalId(null);
-    setActiveRoute(null);
     setShowEmptyNotice(false);
   };
 
@@ -254,7 +225,7 @@ export default function DiscoveryClient({
     {label:speciality && tSpeciality(speciality,lang), clear:()=>setSpeciality('')},
     {label:emergencyOnly && t('emergency247'),clear:()=>setEmergencyOnly(false)},
     {label:savedOnly && t('savedLabel'),clear:()=>setSavedOnly(false)},
-    {label:radius !== 25 && `${radius} km`,clear:()=>setRadius(25)},
+    {label:radius !== 25 && (radius >= 500 ? t('filterRadiusAnywhere') : `${radius} km`),clear:()=>setRadius(25)},
   ].filter(chip=>chip.label);
   const hasActiveFilters = chips.length > 0 || sort !== 'distance';
   const govtCount = useMemo(
@@ -266,16 +237,7 @@ export default function DiscoveryClient({
     [displayedResults],
   );
 
-  const ls = locationStrings(lang);
   const ds = distanceStrings(lang);
-  const geoErrorText =
-    errorCode === 'unavailable'
-      ? t('geoUnavailableError')
-      : errorCode === 'denied'
-        ? ls.denied
-        : errorCode === 'position-unavailable' || errorCode === 'timeout'
-          ? t('geoFailedError')
-          : null;
 
   return (
     <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-6 lg:py-8">
@@ -306,9 +268,7 @@ export default function DiscoveryClient({
 
       {/* ── Central location control (requirement 3) ── */}
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
-        <div className="lg:col-span-1">
-          <details className="card p-4"><summary className="cursor-pointer text-sm font-bold text-brand-900">{hasLocation ? t('yourLocation') : t('useMyLocation')}</summary><LocationControls onOriginChange={() => setSelectedHospitalId(null)} /></details>
-        </div>
+        <FinderLocationControls {...originControls} />
         <div className="card p-4 lg:col-span-2">
           <label htmlFor="hosp-search" className="label">
             {t('searchHospitalLabel')}
@@ -335,20 +295,9 @@ export default function DiscoveryClient({
               />
             </div>
           </div>
-          {geoErrorText && (
-            <p role="alert" className="mt-2 flex items-center gap-1.5 text-xs text-red-700">
-              <AlertCircle size={14} className="shrink-0" />
-              {geoErrorText}
-            </p>
-          )}
-
-          {hasLocation && distanceMeta && (
-            <p className="mt-2 flex items-start gap-1.5 text-[11px] leading-snug text-slate-500" data-testid="distance-disclosure">
-              <RouteIcon size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
-              <span>
-                {distanceMeta.disclosure.text}
-
-              </span>
+          {location && (
+            <p className="mt-2 text-xs text-slate-600" data-testid="distance-disclosure">
+              OSRM driving estimates do not include live traffic. If a road route is unavailable, the labeled straight-line distance is used for nearest sorting and the radius filter.
             </p>
           )}
         </div>
@@ -563,27 +512,25 @@ export default function DiscoveryClient({
         )}
       </div>
 
-      {/* Results: map + route preview + list */}
+      <p role="status" className="sr-only">{estimatesLoading ? 'Calculating hospital distances…' : distances.size ? 'Hospital distance estimates updated.' : ''}</p>
+
+      {/* Results: map, selected hospital and list */}
       <div className="mt-3 grid lg:grid-cols-5 gap-4 items-start">
         <div className={`${mobileView === 'map' ? 'block' : 'hidden'} lg:block lg:col-span-2 lg:sticky lg:top-24`}>
           <MapPanel
             hospitals={displayedResults ?? []}
             center={
-              selectedHospital
+              isLatLng(selectedHospital)
                 ? { lat: selectedHospital.lat, lng: selectedHospital.lng }
-                : hasLocation
-                  ? { lat: location.lat as number, lng: location.lng as number }
+                : location
+                  ? { lat: location.lat, lng: location.lng }
                   : { lat: 20.5937, lng: 78.9629 }
             }
             zoom={selectedHospital ? 13 : 11}
-            userLocation={
-              hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
-                ? { lat: location.lat, lng: location.lng, accuracyM: location.accuracyM }
-                : null
-            }
+            userLocation={location}
+            finderDistanceLabel={finderDistanceLabel}
             selectedHospitalId={selectedHospitalId}
             onSelectHospital={(id) => handleSelectHospital(id)}
-            routeGeometry={activeRoute?.geometry ?? null}
             showTraffic={showTraffic}
           />
 
@@ -598,115 +545,32 @@ export default function DiscoveryClient({
               />
               Live traffic layer
             </label>
-            <span className="text-[10px] text-slate-400">
-              {distanceMeta?.computedAt
-                ? `${ds.lastUpdated}: ${new Date(distanceMeta.computedAt).toLocaleTimeString()}`
-                : ''}
-            </span>
           </div>
 
-          {/* Selected route: Google-derived distance, ETA, traffic impact */}
           {selectedHospital && (
-            <div
-              className="mt-3 card p-4 border-2 border-brand-500 bg-brand-50/40"
-              data-testid="selected-route-panel"
-            >
+            <div className="mt-3 card p-4 border-2 border-brand-500 bg-brand-50/40" data-testid="selected-route-panel">
               <div className="flex items-start justify-between gap-2">
                 <div>
-                  <p className="text-[11px] font-extrabold uppercase tracking-wider text-brand-700 flex items-center gap-1">
-                    <RouteIcon size={13} /> {ds.drivingDistance}
-                  </p>
-                  <h2 className="font-extrabold text-sm text-slate-900 mt-0.5">{selectedHospital.name}</h2>
-                  <p className="mt-0.5 text-[10px] text-slate-500">
-                    {selectedHospital.geoConfidence === 'verified' ? ds.verifiedCoords : ds.approxCoords}
+                  <h2 className="font-extrabold text-sm text-slate-900">{selectedHospital.name}</h2>
+                  <p className="mt-0.5 text-xs text-slate-600">
+                    {verifiedIds.has(selectedHospital.id) ? ds.verifiedCoords : ds.approxCoords}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedHospitalId(null);
-                    setActiveRoute(null);
-                  }}
-                  aria-label="Close route preview"
-                  className="text-slate-400 hover:text-slate-700 p-1"
-                >
-                  <X size={16} />
-                </button>
+                <button type="button" onClick={() => setSelectedHospitalId(null)} aria-label="Close destination preview"
+                  className="text-slate-500 hover:text-slate-700 p-1"><X size={16} /></button>
               </div>
-
-              <div className="mt-2.5 grid grid-cols-2 gap-2 text-center">
-                <div className="rounded-xl bg-white border border-brand-100 p-2.5">
-                  <p className="text-[10px] uppercase font-bold text-slate-500">{ds.drivingDistance}</p>
-                  <p className="text-base font-black text-brand-900" data-testid="route-panel-distance">
-                    {routeBusy
-                      ? '…'
-                      : formatDrivingKm(activeRoute?.distanceKm ?? selectedHospital.roadKm ?? null, lang) ?? '—'}
-                  </p>
-                </div>
-                <div className="rounded-xl bg-white border border-brand-100 p-2.5">
-                  <p className="text-[10px] uppercase font-bold text-slate-500">{ds.eta}</p>
-                  <p className="text-base font-black text-brand-900 flex items-center justify-center gap-1" data-testid="route-panel-eta">
-                    {routeBusy ? (
-                      <Loader2 size={14} className="animate-spin" />
-                    ) : activeRoute?.etaMinutes || selectedHospital.etaMinutes ? (
-                      <>
-                        <Clock size={14} className="text-brand-700" /> ~
-                        {formatDuration(activeRoute?.etaMinutes ?? selectedHospital.etaMinutes, lang)}
-                      </>
-                    ) : (
-                      <span className="text-xs font-bold text-amber-800">{ds.noLiveTraffic}</span>
-                    )}
-                  </p>
-                </div>
-              </div>
-
-              {typeof (activeRoute?.trafficImpactMinutes ?? selectedHospital.trafficImpactMinutes) === 'number' && (
-                <p className="mt-2 text-[11px] font-semibold text-amber-900">
-                  {ds.trafficImpact}: +{activeRoute?.trafficImpactMinutes ?? selectedHospital.trafficImpactMinutes} min
-                </p>
-              )}
-
-              {activeRoute?.alternatives && activeRoute.alternatives.length > 1 && (
-                <p className="mt-1 text-[10px] text-slate-500">
-                  {ds.alternatives}: {activeRoute.alternatives.length - 1} ·{' '}
-                  {ds.sameRouteNote}
-                </p>
-              )}
-
-              {(activeRoute?.disclosure.text || distanceMeta?.disclosure.text) && (
-                <p className="mt-2 text-[10px] text-slate-500 leading-snug">
-                  {activeRoute?.disclosure.text || distanceMeta?.disclosure.text}
-                </p>
-              )}
-              {activeRoute?.error && (
-                <p className="mt-1 text-[10px] font-semibold text-amber-800" data-testid="route-error">
-                  {ds.distanceUnavailableWhy}
-                </p>
-              )}
-
-              <div className="mt-2 flex flex-wrap gap-2">
-                <a
-                  href={
-                    activeRoute?.navigateUrl ??
-                    directionsUrl(
-                      selectedHospital.lat,
-                      selectedHospital.lng,
-                      selectedHospital.shortName,
-                      hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
-                        ? { lat: location.lat, lng: location.lng }
-                        : null,
-                    )
-                  }
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="btn-primary !py-2 !px-3 !text-xs !min-h-[38px] flex-1"
-                >
+              <p className="mt-2 flex items-center gap-1 text-sm font-bold text-brand-900">
+                <RouteIcon size={15} aria-hidden="true" />
+                {!verifiedIds.has(selectedHospital.id) ? 'Location not available for this hospital.'
+                  : location && !selectedDistance ? 'Calculating…' : formatDistance(selectedDistance)}
+              </p>
+              {selectedDistance?.source === 'road' && <p className="text-xs text-slate-600">Estimated driving route, no live traffic</p>}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <a href={directionsUrl(selectedHospital.lat, selectedHospital.lng, `${selectedHospital.name}, ${selectedHospital.address}`, location)}
+                  target="_blank" rel="noopener noreferrer" className="btn-primary !py-2 !px-3 !text-xs !min-h-[38px] flex-1">
                   <Navigation size={14} /> {ds.navigateGmaps}
                 </a>
-                <Link
-                  href={`/hospitals/${selectedHospital.id}`}
-                  className="btn-secondary !py-2 !px-3 !text-xs !min-h-[38px]"
-                >
+                <Link href={`/hospitals/${selectedHospital.id}`} className="btn-secondary !py-2 !px-3 !text-xs !min-h-[38px]">
                   {t('viewDetails')} →
                 </Link>
               </div>
@@ -751,6 +615,18 @@ export default function DiscoveryClient({
                 markerIndex={idx + 1}
                 selected={selectedHospitalId === h.id}
                 onSelect={handleSelectHospital}
+                finderDistance={{
+                  origin: location,
+                  verified: verifiedIds.has(h.id),
+                  result: distances.get(h.id),
+                  error: originControls.error,
+                  locating: originControls.loading,
+                  enable: originControls.request,
+                  retry: () => {
+                    const destination = destinations.find((item) => item.id === h.id);
+                    if (destination) retry(destination);
+                  },
+                }}
               />
             ))
           )}

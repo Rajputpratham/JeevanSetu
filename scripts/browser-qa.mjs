@@ -41,7 +41,11 @@ try {
   await expect(cards).toHaveCount(2);
   await p.locator("#f-type").selectOption("private");
   await expect(cards).toHaveCount(0);
-  await p.reload();
+  // Wait for client hydration after reload before clicking a server-rendered control.
+  await Promise.all([
+    p.waitForResponse((response) => response.url().includes("/api/hospitals?") && response.ok()),
+    p.reload(),
+  ]);
   await expect(input).toHaveValue("AIIMS");
   await expect(p.locator("#f-type")).toHaveValue("private");
   await p.locator("#filter-panel button").last().click();
