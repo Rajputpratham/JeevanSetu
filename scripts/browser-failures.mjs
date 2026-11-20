@@ -9,84 +9,77 @@ const ctx = await browser.newContext({ viewport: { width: 390, height: 844 } });
 const p = await ctx.newPage();
 const go = (path) => p.goto("http://localhost:3000" + path);
 const id = (x) => p.getByTestId(x);
-const label = id("origin-label");
+const card = p.locator("#hospital-card-aiims-new-delhi");
+const locate = p.getByRole("button", { name: /^(Use my location|Retry location)$/ }).first();
+const consent = p.locator("#finder-location-disclosure");
+let osrmRequests = 0;
+let manualSearches = 0;
 try {
   await p.addInitScript(() => {
     window.SpeechRecognition = undefined;
     window.webkitSpeechRecognition = undefined;
   });
+  await p.route("**/table/v1/driving/**", (route) => {
+    osrmRequests++;
+    const coordinates = new URL(route.request().url()).pathname.split("/").at(-1).split(";");
+    const failure = osrmRequests === 1;
+    return route.fulfill({
+      status: failure ? 429 : 200,
+      headers: { "Access-Control-Allow-Origin": "*" },
+      json: { code: "Ok", distances: [coordinates.map((_, i) => i ? 4200 : 0)], durations: [coordinates.map((_, i) => i ? 900 : 0)] },
+    });
+  });
+  await p.route("**/api/geocode/finder", (route) => {
+    manualSearches++;
+    assert.equal(route.request().postDataJSON().query, "Gurugram");
+    return route.fulfill({ json: { results: [{ label: "Gurugram, Haryana", lat: 28.4595, lng: 77.0266 }, { label: "Another match", lat: 28.61, lng: 77.21 }] } });
+  });
   await go("/hospitals?q=AIIMS");
-  await p.locator("main details summary").first().click();
+  await expect(consent).toContainText("sent to OSRM");
+  await expect(card.getByText("Enable location to see distance")).toBeVisible();
+  assert.equal(osrmRequests, 0);
   for (const [code, text] of [
-    [1, /denied/i],
-    [2, /GPS fix/i],
-    [3, /timed out/i],
+    [1, /Location blocked/],
+    [2, /determine its position/],
+    [3, /timed out/],
   ]) {
-    await p.evaluate(
-      (code) =>
-        Object.defineProperty(navigator, "geolocation", {
-          configurable: true,
-          value: {
-            getCurrentPosition: (_, fail) =>
-              fail({
-                code,
-                PERMISSION_DENIED: 1,
-                POSITION_UNAVAILABLE: 2,
-                TIMEOUT: 3,
-              }),
-          },
-        }),
-      code,
-    );
-    await id("use-precise-location").click();
-    await expect(id("location-controls").getByRole("alert")).toContainText(
-      text,
-    );
-    await expect(label).toContainText("Location not set");
+    await p.evaluate((code) => Object.defineProperty(navigator, "geolocation", {
+      configurable: true, value: { getCurrentPosition: (_, fail) => fail({ code }) },
+    }), code);
+    await locate.click();
+    await expect(card.getByTestId("card-distance")).toContainText(text);
+    await expect(card.getByRole("button", { name: "Retry location" })).toBeVisible();
   }
-  await p.evaluate(() =>
-    Object.defineProperty(navigator, "geolocation", {
-      configurable: true,
-      value: undefined,
-    }),
-  );
-  await id("use-precise-location").click();
-  await expect(id("location-controls").getByRole("alert")).toContainText(
-    /does not support/,
-  );
-  await p
-    .getByRole("button", { name: "Search by PIN Code", exact: true })
-    .click();
-  await p.locator("#loc-pincode").fill("12");
-  await p.locator("#loc-pincode").press("Enter");
-  await expect(p.getByText(/Enter a valid 6-digit/)).toBeVisible();
-  await p
-    .getByRole("button", { name: "Search by Address", exact: true })
-    .click();
-  await expect(p.getByText(/Enter a valid 6-digit/)).toHaveCount(0);
-  await p.locator("#loc-address").fill("Pusa Road");
-  await p.locator("#loc-address").press("Enter");
-  await p.getByRole("button", { name: /Pusa Road, Karol Bagh/ }).click();
-  await expect(label).toContainText(/Pusa Road/, { timeout: 12000 });
-  await p.route("**/api/geocode/reverse?**", (r) =>
-    r.fulfill({ json: { label: "Test locality" } }),
-  );
-  await ctx.grantPermissions(["geolocation"]);
-  await ctx.setGeolocation({ latitude: 28.61, longitude: 77.21, accuracy: 15 });
-  await p.evaluate(() => delete navigator.geolocation);
-  await id("use-precise-location").click();
-  await expect(id("location-controls")).toContainText("15 m");
-  await id("toggle-live-follow").click();
-  await expect(id("toggle-live-follow")).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await id("toggle-live-follow").click();
-  await expect(id("toggle-live-follow")).toHaveAttribute(
-    "aria-pressed",
-    "false",
-  );
+  await p.evaluate(() => Object.defineProperty(navigator, "geolocation", {
+    configurable: true, value: undefined,
+  }));
+  await locate.click();
+  await expect(card.getByTestId("card-distance")).toContainText(/does not support/);
+  await p.getByLabel("Or enter a city or pincode").fill("Gurugram");
+  assert.equal(manualSearches, 0);
+  await p.getByLabel("Or enter a city or pincode").press("Enter");
+  await expect(p.getByText("Multiple matches.", { exact: false })).toBeVisible();
+  assert.equal(manualSearches, 1);
+  assert.equal(osrmRequests, 0);
+  await p.getByRole("button", { name: "Gurugram, Haryana" }).click();
+  await expect(card.getByTestId("card-distance")).toHaveText("Calculating…");
+  await expect(card.getByTestId("card-distance")).toContainText(/approx\..*straight line/);
+  await card.getByRole("button", { name: "Retry route" }).click();
+  await expect(card.getByText("4.2 km · 15 min drive")).toBeVisible();
+  await expect(card.getByRole("link", { name: "Directions" })).toHaveAttribute("href", /origin=28.4595,77.0266/);
+  assert.equal(osrmRequests, 2);
+  for (const width of [320, 390, 1440]) {
+    await p.setViewportSize({ width, height: 960 });
+    await expect(card.getByText("Estimated driving route")).toBeVisible();
+    assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `horizontal overflow at ${width}px`);
+  }
+  await p.reload();
+  await expect(card.getByText("4.2 km · 15 min drive")).toBeVisible();
+  await p.getByRole("button", { name: "Clear location" }).click();
+  await expect(card.getByText("Enable location to see distance")).toBeVisible();
   assert(!p.url().includes("lat="));
+  console.log("Finder consent, location errors, route fallback/retry, session restore and 320/390/1440px layouts verified (mocked services)");
+  await p.setViewportSize({ width: 390, height: 844 });
   await go("/contact");
   await p.locator("#c-msg").fill("Local test draft, not for delivery");
   await p.locator("main button[type=submit]").click();
@@ -157,7 +150,7 @@ try {
   await p.locator('#mobile-nav a[href="/cost-estimator"]').click();
   await expect(p.locator("#treatment")).toBeVisible();
   console.log(
-    "Location failure/permission, manual origin, live-follow stop, email draft and constrained recommendations verified",
+    "Location failures, manual origin, email draft and constrained recommendations verified",
   );
 } finally {
   await browser.close();

@@ -15,7 +15,11 @@ import { HOSPITAL_GEO } from './hospital-locations';
  * Every phone number below is a publicly listed hospital switchboard number.
  * Numbers can change — always cross-check before an emergency visit.
  */
-const RAW_HOSPITALS: Hospital[] = [
+// Draft listings may omit coordinates; the verified registry can supply them.
+// Keep the legacy numeric model at the export boundary. NaN means missing in
+// memory (serialized as null) and must never be treated as a routable point.
+type HospitalListing = Omit<Hospital, 'lat' | 'lng'> & Partial<Pick<Hospital, 'lat' | 'lng'>>;
+const RAW_HOSPITALS: HospitalListing[] = [
   // ─────────────────────────── DELHI NCR — GOVERNMENT ───────────────────────────
   {
     id: 'aiims-new-delhi',
@@ -713,8 +717,8 @@ export const HOSPITALS: Hospital[] = RAW_HOSPITALS.map((h) => {
   const geo = HOSPITAL_GEO[h.id];
   return {
     ...h,
-    lat: geo?.lat ?? h.lat,
-    lng: geo?.lng ?? h.lng,
+    lat: geo?.lat ?? h.lat ?? Number.NaN,
+    lng: geo?.lng ?? h.lng ?? Number.NaN,
     address: geo?.addressOverride ?? h.address,
     geoConfidence: geo?.confidence ?? 'approximate',
     placeId: geo?.placeId ?? null,

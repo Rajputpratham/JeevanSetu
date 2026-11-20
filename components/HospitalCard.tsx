@@ -16,6 +16,7 @@ import { useCompare } from '@/lib/compare';
 import { useSavedHospitals } from '@/lib/saved';
 import { useUserLocation } from '@/lib/useLocation';
 import { useLang, DictKey } from '@/lib/i18n';
+import FinderDistanceBadge, { type FinderDistance } from '@/components/hospitals/FinderDistanceBadge';
 import { tFacility, tSpeciality } from '@/lib/i18n-data';
 
 export type EnrichedHospital = Hospital & {
@@ -37,6 +38,7 @@ export type EnrichedHospital = Hospital & {
 interface Props {
   hospital: EnrichedHospital;
   showDistance?: boolean;
+  finderDistance?: FinderDistance;
   /** 1-based marker index matching the numbered pin on the Google map */
   markerIndex?: number;
   selected?: boolean;
@@ -53,6 +55,7 @@ const PROFILE_KEY: Record<Hospital['costProfile'], DictKey> = {
 export default function HospitalCard({
   hospital,
   showDistance = true,
+  finderDistance,
   markerIndex,
   selected = false,
   onSelect,
@@ -65,15 +68,16 @@ export default function HospitalCard({
   const saved = isSaved(hospital.id);
   const ds = distanceStrings(lang);
   /**
-   * Single rule for every card in the product: the big number is the Google
-   * driving distance, or an explicit "unavailable" state. A straight-line value
-   * is only ever shown underneath, with its own separate label.
+   * Legacy travel metrics for home-page cards. Finder cards use OSRM estimates
+   * and never read a legacy origin or legacy travel metrics.
    */
   const dist = hospital.roadKm ?? hospital.distanceKm ?? null;
   const drivingLabel = formatDriving(dist, lang);
   const straightLabel = formatStraightLineKm(hospital.straightKm ?? null, lang);
   const eta = hospital.etaMinutes ?? null;
   const trafficImpact = hospital.trafficImpactMinutes ?? null;
+  const directionsOrigin = finderDistance ? finderDistance.origin
+    : typeof location.lat === 'number' && typeof location.lng === 'number' ? { lat: location.lat, lng: location.lng } : null;
   const isGovt = hospital.type === 'government';
 
   const trafficColor =
@@ -122,7 +126,7 @@ export default function HospitalCard({
           )}
 
           <div className="min-w-0">
-            <h3 className="font-bold text-slate-900 leading-snug">
+            <h3 className="break-words font-bold text-slate-900 leading-snug">
               <Link
                 href={`/hospitals/${hospital.id}`}
                 onClick={(e) => e.stopPropagation()}
@@ -159,7 +163,7 @@ export default function HospitalCard({
           </div>
         </div>
 
-        {showDistance && (
+        {showDistance && (finderDistance ? <FinderDistanceBadge {...finderDistance} /> : (
           <div className="text-right shrink-0" data-testid="card-distance-block">
             {drivingLabel ? (
               <p className="text-lg font-extrabold text-brand-800 leading-none" data-testid="card-distance">
@@ -192,7 +196,7 @@ export default function HospitalCard({
               </p>
             )}
           </div>
-        )}
+        ))}
       </div>
 
       <p className="mt-3 text-sm text-slate-600 flex items-start gap-1.5">
@@ -236,10 +240,8 @@ export default function HospitalCard({
           href={directionsUrl(
             hospital.lat,
             hospital.lng,
-            hospital.shortName,
-            typeof location.lat === 'number' && typeof location.lng === 'number'
-              ? { lat: location.lat, lng: location.lng }
-              : null,
+            finderDistance && !finderDistance.verified ? `${hospital.shortName}, ${hospital.address}` : hospital.shortName,
+            directionsOrigin,
           )}
           target="_blank"
           rel="noopener noreferrer"

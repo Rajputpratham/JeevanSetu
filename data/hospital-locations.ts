@@ -32,6 +32,8 @@ export interface HospitalGeoRecord {
   confidence: CoordinateConfidence;
   /** Google Place ID (only when genuinely known — never invented). */
   placeId: string | null;
+  /** Link to public coordinate evidence, when available. */
+  sourceUrl?: string;
   /** Human-readable source note rendered in the UI. */
   note: string;
   /** Optional override when the listed street address in hospitals.ts is wrong. */
@@ -77,6 +79,7 @@ export const HOSPITAL_GEO: Record<string, HospitalGeoRecord> = {
     lng: 77.2089,
     confidence: 'verified',
     placeId: null,
+    sourceUrl: 'https://en.wikipedia.org/wiki/All_India_Institute_of_Medical_Sciences,_New_Delhi',
     note: 'AIIMS main campus, Ansari Nagar (Sri Aurobindo Marg). Coordinates cross-checked against the published AIIMS Metro / campus location.',
   },
   'safdarjung-hospital': {

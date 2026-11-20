@@ -3,7 +3,7 @@ import PrivacyClient from '@/components/pages/PrivacyClient';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy — JeevanSetu',
-  description: 'JeevanSetu collects no personal medical data. Location and comparison choices stay in your browser. No ads, no tracking, no sale of data.',
+  description: 'JeevanSetu collects no personal medical data. Location sharing is optional. Comparison choices stay in your browser. No ads, no tracking, no sale of data.',
 };
 
 export default function PrivacyPage() {

@@ -41,7 +41,11 @@ export function formatDuration(minutes: number | null | undefined, lang: Lang = 
 }
 
 /** Google Maps place search link — fallback when origin is unknown. */
-export function directionsUrl(lat: number, lng: number, name?: string, origin?: { lat: number; lng: number } | null): string {
+export function directionsUrl(lat: number | null | undefined, lng: number | null | undefined, name?: string, origin?: { lat: number; lng: number } | null): string {
+  if (typeof lat !== 'number' || !Number.isFinite(lat) || Math.abs(lat) > 90 ||
+      typeof lng !== 'number' || !Number.isFinite(lng) || Math.abs(lng) > 180) {
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name ?? '')}`;
+  }
   if (origin && Number.isFinite(origin.lat) && Number.isFinite(origin.lng)) {
     return directionsFromToUrl(origin.lat, origin.lng, lat, lng, name);
   }

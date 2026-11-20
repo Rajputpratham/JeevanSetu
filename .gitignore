@@ -6,3 +6,6 @@ next-env.d.ts
 .DS_Store
 .env*
 !.env.example
+
+# Local response cache for one-off setup-time geocoding
+/.nominatim-geocode-cache.json

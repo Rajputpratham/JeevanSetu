@@ -1,6 +1,7 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Hospital } from '@/data/types';
+import { isLatLng } from '@/lib/distance';
 import { formatDrivingKm, formatDuration } from '@/lib/geo';
 import { useLang } from '@/lib/i18n';
 import { distanceStrings } from '@/lib/ui-strings';
@@ -64,6 +65,7 @@ interface Props {
   /** Called when the user clicks the map to choose an origin. */
   onPickPoint?: (lat: number, lng: number) => void;
   showTraffic?: boolean;
+  finderDistanceLabel?: (hospitalId: string) => string;
 }
 
 /**
@@ -89,6 +91,7 @@ export default function GoogleMapView({
   alternativeGeometries = null,
   onPickPoint,
   showTraffic = false,
+  finderDistanceLabel,
 }: Props) {
   const { lang } = useLang();
   const ds = distanceStrings(lang);
@@ -212,6 +215,7 @@ export default function GoogleMapView({
 
     // Numbered markers — index + 1 is the shared identity with the list.
     hospitals.slice(0, 60).forEach((h, i) => {
+      if (!isLatLng(h)) return;
       const idx = i + 1;
       const isSelected = selectedHospitalId === h.id;
       const marker = new g.Marker({
@@ -233,15 +237,16 @@ export default function GoogleMapView({
       marker.addListener('click', () => {
         onSelectHospital?.(h.id, idx);
         const driving = formatDrivingKm(h.roadKm ?? h.distanceKm ?? null, lang);
+        const finderLabel = finderDistanceLabel?.(h.id);
         const eta = typeof h.etaMinutes === 'number' ? formatDuration(h.etaMinutes, lang) : null;
         if (infoRef.current) {
           infoRef.current.setContent?.(
             `<div style="font:600 13px/1.4 system-ui,sans-serif;max-width:240px">
                <div style="font-weight:800;margin-bottom:4px">${idx}. ${escapeHtml(h.name)}</div>
-               <div style="color:#334155;font-size:12px">${escapeHtml(ds.drivingDistance)}: ${
+               <div style="color:#334155;font-size:12px">${finderLabel ? escapeHtml(finderLabel) : `${escapeHtml(ds.drivingDistance)}: ${
                  driving ? escapeHtml(driving) : `<span style="color:#b45309">${escapeHtml(ds.distanceUnavailable)}</span>`
-               }</div>
-               ${eta ? `<div style="color:#334155;font-size:12px">${escapeHtml(ds.eta)}: ~${escapeHtml(eta)}</div>` : ''}
+               }`}</div>
+               ${!finderLabel && eta ? `<div style="color:#334155;font-size:12px">${escapeHtml(ds.eta)}: ~${escapeHtml(eta)}</div>` : ''}
                <a href="/hospitals/${encodeURIComponent(h.id)}" style="display:inline-block;margin-top:6px;background:#1f7453;color:#fff;padding:5px 10px;border-radius:7px;font-size:12px;font-weight:700;text-decoration:none">Details →</a>
              </div>`,
           );
@@ -297,7 +302,7 @@ export default function GoogleMapView({
       }
     }
   }, [
-    ready, hospitals, userLocation, selectedHospitalId, routeGeometry, alternativeGeometries,
+    ready, hospitals, finderDistanceLabel, userLocation, selectedHospitalId, routeGeometry, alternativeGeometries,
     onSelectHospital, lang, ds,
   ]);
 
