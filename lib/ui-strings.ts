@@ -16,6 +16,8 @@ export interface DistanceStrings {
   straightLine: string;
   distanceUnavailable: string;
   distanceUnavailableWhy: string;
+  /** Shown in place of the orange fallback when the user has not shared a location yet. */
+  enableLocationDistance: string;
   eta: string;
   etaShort: string;
   trafficImpact: string;
@@ -87,6 +89,7 @@ const DISTANCE_EN: DistanceStrings = {
   straightLine: 'Approximate straight-line distance',
   distanceUnavailable: 'Driving distance unavailable',
   distanceUnavailableWhy: 'Live Google route data could not be loaded, so no road distance is shown.',
+  enableLocationDistance: 'Enable location to see driving distance.',
   eta: 'Estimated arrival time',
   etaShort: 'min',
   trafficImpact: 'Traffic impact',
@@ -106,6 +109,7 @@ const DISTANCE_HI: DistanceStrings = {
   straightLine: 'अनुमानित सीधी दूरी',
   distanceUnavailable: 'सड़क दूरी उपलब्ध नहीं',
   distanceUnavailableWhy: 'Google रूट डेटा लोड नहीं हो सका, इसलिए कोई सड़क दूरी नहीं दिखाई गई है।',
+  enableLocationDistance: 'सड़क दूरी देखने के लिए स्थान सक्षम करें।',
   eta: 'अनुमानित पहुंचने का समय',
   etaShort: 'मिनट',
   trafficImpact: 'ट्रैफ़िक प्रभाव',

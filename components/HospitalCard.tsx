@@ -11,7 +11,7 @@ import {
   directionsUrl,
   formatStraightLineKm,
 } from '@/lib/geo';
-import { distanceStrings } from '@/lib/ui-strings';
+import { distanceStrings, locationStrings } from '@/lib/ui-strings';
 import { useCompare } from '@/lib/compare';
 import { useSavedHospitals } from '@/lib/saved';
 import { useUserLocation } from '@/lib/useLocation';
@@ -43,6 +43,12 @@ interface Props {
   markerIndex?: number;
   selected?: boolean;
   onSelect?: (hospitalId: string) => void;
+  /**
+   * True while the client-side fallback routing call is in flight for this card.
+   * Only affects the legacy (non-finder) distance block: shows "Calculating…"
+   * instead of flashing the unavailable fallback before results arrive.
+   */
+  distancePending?: boolean;
 }
 
 const PROFILE_KEY: Record<Hospital['costProfile'], DictKey> = {
@@ -59,6 +65,7 @@ export default function HospitalCard({
   markerIndex,
   selected = false,
   onSelect,
+  distancePending = false,
 }: Props) {
   const { t, lang } = useLang();
   const { location } = useUserLocation();
@@ -67,6 +74,7 @@ export default function HospitalCard({
   const inCompare = has(hospital.id);
   const saved = isSaved(hospital.id);
   const ds = distanceStrings(lang);
+  const ls = locationStrings(lang);
   /**
    * Legacy travel metrics for home-page cards. Finder cards use OSRM estimates
    * and never read a legacy origin or legacy travel metrics.
@@ -76,8 +84,10 @@ export default function HospitalCard({
   const straightLabel = formatStraightLineKm(hospital.straightKm ?? null, lang);
   const eta = hospital.etaMinutes ?? null;
   const trafficImpact = hospital.trafficImpactMinutes ?? null;
-  const directionsOrigin = finderDistance ? finderDistance.origin
-    : typeof location.lat === 'number' && typeof location.lng === 'number' ? { lat: location.lat, lng: location.lng } : null;
+  const hasOrigin =
+    typeof location.lat === 'number' && Number.isFinite(location.lat) &&
+    typeof location.lng === 'number' && Number.isFinite(location.lng);
+  const directionsOrigin = finderDistance ? finderDistance.origin : hasOrigin ? { lat: location.lat as number, lng: location.lng as number } : null;
   const isGovt = hospital.type === 'government';
 
   const trafficColor =
@@ -169,13 +179,20 @@ export default function HospitalCard({
               <p className="text-lg font-extrabold text-brand-800 leading-none" data-testid="card-distance">
                 {drivingLabel}
               </p>
+            ) : distancePending && hasOrigin ? (
+              <p
+                className="text-[11px] font-bold text-slate-600 leading-tight"
+                data-testid="card-distance-calculating"
+              >
+                {lang === 'hi' ? 'गणना हो रही है…' : 'Calculating…'}
+              </p>
             ) : (
               <p
                 className="text-[11px] font-bold text-amber-800 leading-tight max-w-[92px]"
                 data-testid="card-distance-unavailable"
-                title={ds.distanceUnavailableWhy}
+                title={hasOrigin ? ds.distanceUnavailableWhy : ls.notSetWhy}
               >
-                {ds.distanceUnavailable}
+                {hasOrigin ? ds.distanceUnavailable : ds.enableLocationDistance}
               </p>
             )}
             <p className="text-[10px] uppercase tracking-wide text-slate-500 mt-1">
