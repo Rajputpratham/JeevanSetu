@@ -1,12 +1,16 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Loader2, LocateFixed, AlertCircle, MapPin } from 'lucide-react';
 import { useUserLocation } from '@/lib/useLocation';
+import { useHospitalDistances } from '@/hooks/useHospitalDistances';
+import { resolveHospitalGeo } from '@/data/hospital-locations';
 import HospitalCard, { EnrichedHospital } from '@/components/HospitalCard';
 import { useLang } from '@/lib/i18n';
 import { tPresetLabel } from '@/lib/i18n-data';
 import { locationStrings } from '@/lib/ui-strings';
+
+const MAX_CARDS = 4;
 
 export default function NearbySection() {
   const { location, hasLocation, requestGeolocation, status, errorCode } = useUserLocation();
@@ -14,30 +18,99 @@ export default function NearbySection() {
   const [hospitals, setHospitals] = useState<EnrichedHospital[] | null>(null);
   const [failed, setFailed] = useState(false);
 
+  // Ask for the device location once, on page load. If the user denies or the
+  // browser cannot provide a position we keep the directory visible and each
+  // card shows a graceful fallback — never a guessed distance.
   useEffect(() => {
-    if (!hasLocation) {
-      setHospitals([]);
-      setFailed(false);
-      return;
-    }
+    if (!hasLocation && status === 'idle') requestGeolocation();
+    // Mount-only on purpose: never re-prompt after a denial or error.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Load the nearby list with or without an origin. The API skips the routing
+  // provider entirely when no origin is supplied, so browsing never depends on
+  // sharing your location. Re-runs only when the origin itself changes.
+  useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
     setHospitals(null);
     setFailed(false);
-    fetch(`/api/hospitals?lat=${location.lat}&lng=${location.lng}&source=${location.source}&radius=1000&sort=distance&lang=${lang}`)
+    const params = new URLSearchParams({ radius: '1000', sort: 'distance', lang });
+    if (hasLocation) {
+      params.set('lat', String(location.lat));
+      params.set('lng', String(location.lng));
+      params.set('source', location.source);
+    }
+    fetch(`/api/hospitals?${params.toString()}`, { signal: controller.signal, cache: 'no-store' })
       .then((r) => {
         if (!r.ok) throw new Error('bad response');
         return r.json();
       })
       .then((data) => {
-        if (!cancelled) setHospitals((data.results ?? []).slice(0, 4));
+        if (!cancelled) setHospitals((data.results ?? []).slice(0, MAX_CARDS));
       })
       .catch(() => {
         if (!cancelled) setFailed(true);
-      });
+      })
+      .finally(() => clearTimeout(timer));
     return () => {
       cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
     };
+    // Depend on primitive coordinates, not the context object identity.
   }, [hasLocation, location.lat, location.lng, location.source, lang]);
+
+  // Stable origin object for the OSRM fallback hook — memoized on primitives so
+  // it is not recreated on every render (which would re-trigger routing).
+  const origin = useMemo(
+    () => (hasLocation ? { lat: location.lat as number, lng: location.lng as number } : null),
+    [hasLocation, location.lat, location.lng],
+  );
+
+  // Verified hospital coordinates for the key-free OSRM table lookup. Only cards
+  // with a trustworthy coordinate are routable; the rest keep the fallback.
+  const destinations = useMemo(
+    () =>
+      (hospitals ?? []).map((h) => {
+        const geo = resolveHospitalGeo(h);
+        return geo.valid && geo.confidence === 'verified'
+          ? { id: h.id, lat: geo.lat, lng: geo.lng }
+          : { id: h.id };
+      }),
+    [hospitals],
+  );
+  // Key-free driving estimates (OSRM), computed once and cached by lib/distance
+  // for 15 minutes — never re-fetched per render. Used only when the server
+  // (Google Routes) could not supply a figure.
+  const { distances } = useHospitalDistances(origin, destinations);
+
+  const distancePending =
+    hasLocation &&
+    destinations.some((d) => typeof d.lat === 'number' && !distances.has(d.id));
+
+  // Prefer the server's Google Routes figure (includes traffic when configured);
+  // otherwise fall back to the client-side OSRM estimate; otherwise leave null so
+  // the card keeps its own honest per-card fallback.
+  const merged = useMemo(
+    () =>
+      (hospitals ?? []).map((h) => {
+        if (typeof h.distanceKm === 'number' && Number.isFinite(h.distanceKm)) return h;
+        const osrm = distances.get(h.id);
+        if (osrm && osrm.source === 'road' && typeof osrm.km === 'number' && Number.isFinite(osrm.km)) {
+          return {
+            ...h,
+            distanceKm: osrm.km,
+            roadKm: osrm.km,
+            etaMinutes: typeof osrm.minutes === 'number' && Number.isFinite(osrm.minutes) ? osrm.minutes : null,
+            travelSource: 'osrm-estimate',
+          };
+        }
+        return h;
+      }),
+    [hospitals, distances],
+  );
 
   const locDisplay = hasLocation
     ? location.source === 'geolocation'
@@ -45,11 +118,6 @@ export default function NearbySection() {
       : tPresetLabel(location.label, lang)
     : locationStrings(lang).notSet;
 
-  if (!hasLocation) return <aside className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-3 text-sm text-brand-900 sm:px-6 lg:px-8">
-    <span className="inline-flex items-center gap-2"><MapPin size={16}/>{lang === 'hi' ? 'स्थान बताए बिना भी अस्पताल खोज सकते हैं।' : 'Browse the directory without sharing your location.'}</span>
-    <button className="min-h-[44px] underline underline-offset-4 font-semibold" onClick={requestGeolocation} disabled={status === 'locating'}>{t('useMyLocation')}</button>
-    {errorCode && <span role="alert">{errorCode === 'denied' ? t('geoDeniedError') : t('geoFailedError')}</span>}
-  </aside>;
   return (
     <section aria-labelledby="nearby-heading" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-12">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
@@ -81,6 +149,21 @@ export default function NearbySection() {
         </div>
       </div>
 
+      {!hasLocation && (
+        <div
+          role="status"
+          className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-900"
+        >
+          <span className="inline-flex items-center gap-2">
+            <MapPin size={16} />
+            {lang === 'hi' ? 'स्थान बताए बिना भी अस्पताल खोज सकते हैं।' : 'Browse the directory without sharing your location.'}
+          </span>
+          <button type="button" className="min-h-[44px] underline underline-offset-4 font-semibold" onClick={requestGeolocation} disabled={status === 'locating'}>
+            {t('useMyLocation')}
+          </button>
+        </div>
+      )}
+
       {failed ? (
         <div role="alert" className="card mt-6 p-6 text-center">
           <p className="font-semibold text-slate-800">{t('listLoadError')}</p>
@@ -97,8 +180,8 @@ export default function NearbySection() {
         </div>
       ) : (
         <div className="mt-6 grid gap-4 md:grid-cols-2">
-          {hospitals.map((h, idx) => (
-            <HospitalCard key={h.id} hospital={h} markerIndex={idx + 1} />
+          {merged.map((h, idx) => (
+            <HospitalCard key={h.id} hospital={h} markerIndex={idx + 1} distancePending={distancePending} />
           ))}
         </div>
       )}
