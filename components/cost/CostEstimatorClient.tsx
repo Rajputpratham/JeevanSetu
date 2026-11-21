@@ -10,12 +10,26 @@ import { formatINR, formatRange } from '@/lib/format';
 import { ROOM_LABEL, ROOM_LABEL_HI, RoomType, EstimateResult } from '@/lib/cost-estimate';
 import { useLang } from '@/lib/i18n';
 import { TREATMENT_SOURCE_HI, tTreatmentCategory, tTreatmentNote, tTreatmentTest } from '@/lib/i18n-data';
+import { useTreatmentSelection } from '@/lib/treatment-selection';
+import { useSearchParams } from 'next/navigation';
 
 const CATEGORY_ORDER = ['Outpatient (OPD)', 'Diagnostic test', 'Inpatient / OPD', 'Maternity', 'Surgery / Procedure', 'Chronic care', 'Oncology'];
 
 export default function CostEstimatorClient() {
   const { t, lang } = useLang();
-  const [treatmentId, setTreatmentId] = useState('normal-delivery');
+  const searchParams = useSearchParams();
+  const selection = useTreatmentSelection();
+  const [treatmentId, setTreatmentId] = useState(() => {
+    const fromUrl = searchParams.get('treatment');
+    return (fromUrl && getTreatmentById(fromUrl)?.id) || 'normal-delivery';
+  });
+
+  // Keep the shared selection in sync with the estimator, so "Find hospitals
+  // near me" and the result cards price the same treatment.
+  useEffect(() => {
+    selection.setTreatmentId(treatmentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [treatmentId]);
   const treatment = useMemo(() => getTreatmentById(treatmentId)!, [treatmentId]);
 
   const [includedTests, setIncludedTests] = useState<number[]>(treatment.tests.map((_, i) => i));
@@ -209,6 +223,16 @@ export default function CostEstimatorClient() {
                   <p className="flex items-center justify-center gap-2 text-[11px] font-extrabold uppercase tracking-widest text-sky-800"><Building2 size={14} />{t('privateHospitalLabel')} {highlight === 'private' && t('yourPickSuffix')}</p>
                   <p className="mt-2 text-2xl sm:text-3xl font-black text-sky-900 leading-tight">{formatINR(result.privateTotal[0])}<span className="block text-sm font-bold text-sky-800">{t('rangeTo')}</span>{formatINR(result.privateTotal[1])}</p>
                 </div>
+              </div>
+
+              <div className="border-b border-slate-100 px-5 py-3 print-hidden">
+                <Link
+                  href={`/hospitals?treatment=${encodeURIComponent(treatmentId)}`}
+                  className="btn-secondary !py-2.5 !text-sm inline-flex items-center gap-1.5"
+                  data-testid="estimator-to-finder"
+                >
+                  {t('estimatorFindHospitalsCta')}
+                </Link>
               </div>
 
               {/* Unavailable components warning */}

@@ -8,6 +8,7 @@ import { LanguageProvider } from '@/lib/i18n';
 import { LocationProvider } from '@/lib/useLocation';
 import { CompareProvider } from '@/lib/compare';
 import { SavedProvider } from '@/lib/saved';
+import { TreatmentProvider } from '@/lib/treatment-selection';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://www.jeevansetu.in'),
@@ -52,6 +53,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <LocationProvider>
             <CompareProvider>
               <SavedProvider>
+                <TreatmentProvider>
                 <SkipLink />
                 <Header />
                 <main id="main-content" className="flex-1">
@@ -59,6 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </main>
                 <Footer />
                 <AssistantLauncher />
+                </TreatmentProvider>
               </SavedProvider>
             </CompareProvider>
           </LocationProvider>

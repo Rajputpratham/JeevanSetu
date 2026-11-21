@@ -30,6 +30,21 @@ export interface DistanceStrings {
   approxCoords: string;
   sourceGoogle: string;
   sameRouteNote: string;
+  /** Key-free OSRM routing (no live traffic). */
+  routeUnavailableTitle: string;
+  routeUnavailableWhy: string;
+  estimatedDriveTime: string;
+  liveTraffic: string;
+  noLiveTrafficNote: string;
+  providerOsrm: string;
+  providerGoogle: string;
+  enableLocationCta: string;
+  enableLocationExplainer: string;
+  deniedCompact: string;
+  timeoutCompact: string;
+  insecureCompact: string;
+  getDirections: string;
+  straightLineOnlyNote: string;
 }
 
 export interface LocationStrings {
@@ -102,6 +117,21 @@ const DISTANCE_EN: DistanceStrings = {
   approxCoords: 'Approximate hospital location — verify the entrance before travelling',
   sourceGoogle: 'Google Routes API',
   sameRouteNote: 'Distance and ETA come from the same selected route.',
+  routeUnavailableTitle: 'Road route unavailable',
+  routeUnavailableWhy: 'No road route could be computed right now, so no road distance or drive time is shown.',
+  estimatedDriveTime: 'Estimated drive time',
+  liveTraffic: 'Live traffic',
+  noLiveTrafficNote: 'Live traffic is not available from this routing provider. This is an estimate without traffic.',
+  providerOsrm: 'Estimated with OSRM · © OpenStreetMap contributors',
+  providerGoogle: 'Google Routes API',
+  enableLocationCta: 'Use my location',
+  enableLocationExplainer:
+    'Your browser will ask for permission. You can also type a city or pincode — JeevanSetu never guesses where you are.',
+  deniedCompact: 'Location permission denied. Pick a city or pincode to see the road distance.',
+  timeoutCompact: 'Location request timed out. Try again or pick a city or pincode.',
+  insecureCompact: 'Location needs an HTTPS connection. Pick a city or pincode instead.',
+  getDirections: 'Get directions',
+  straightLineOnlyNote: 'Shown for context only — this is not a driving distance and no drive time is derived from it.',
 };
 
 const DISTANCE_HI: DistanceStrings = {
@@ -122,6 +152,21 @@ const DISTANCE_HI: DistanceStrings = {
   approxCoords: 'अनुमानित अस्पताल स्थान — जाने से पहले प्रवेश द्वार की पुष्टि करें',
   sourceGoogle: 'Google Routes API',
   sameRouteNote: 'दूरी और समय एक ही चुने गए मार्ग से लिए गए हैं।',
+  routeUnavailableTitle: 'सड़क मार्ग उपलब्ध नहीं',
+  routeUnavailableWhy: 'अभी कोई सड़क मार्ग नहीं निकाला जा सका, इसलिए सड़क दूरी या यात्रा समय नहीं दिखाया गया है।',
+  estimatedDriveTime: 'अनुमानित यात्रा समय',
+  liveTraffic: 'लाइव ट्रैफ़िक',
+  noLiveTrafficNote: 'इस रूटिंग प्रदाता के पास लाइव ट्रैफ़िक डेटा नहीं है। यह बिना ट्रैफ़िक वाला अनुमान है।',
+  providerOsrm: 'OSRM से अनुमानित · © OpenStreetMap योगदानकर्ता',
+  providerGoogle: 'Google Routes API',
+  enableLocationCta: 'मेरी लोकेशन इस्तेमाल करें',
+  enableLocationExplainer:
+    'आपका ब्राउज़र अनुमति मांगेगा। आप शहर या पिनकोड भी लिख सकते हैं — JeevanSetu आपकी लोकेशन का अनुमान कभी नहीं लगाता।',
+  deniedCompact: 'लोकेशन अनुमति अस्वीकृत। सड़क दूरी देखने के लिए शहर या पिनकोड चुनें।',
+  timeoutCompact: 'लोकेशन अनुरोध समय-सीमा पार कर गया। दोबारा प्रयास करें या शहर/पिनकोड चुनें।',
+  insecureCompact: 'लोकेशन के लिए HTTPS कनेक्शन आवश्यक है। इसके बजाय शहर या पिनकोड चुनें।',
+  getDirections: 'दिशा-निर्देश पाएं',
+  straightLineOnlyNote: 'केवल संदर्भ के लिए — यह सड़क दूरी नहीं है और इससे यात्रा समय नहीं निकाला जाता।',
 };
 
 const LOCATION_EN: LocationStrings = {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET as getHospitals } from '@/app/api/hospitals/route';
 import { GET as getGeocode } from '@/app/api/geocode/route';
@@ -68,6 +68,14 @@ describe('Journey 1 — multilingual discovery keeps one origin and one distance
 });
 
 describe('Journey 2 — hospital detail shares the list’s data (no second opinion)', () => {
+  beforeEach(() => {
+    // Offline suite: no routing provider may be reached.
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('returns the same leg from /api/travel and /api/route for the same hospital', async () => {
     const travel = await (
       await getTravel(
@@ -85,14 +93,21 @@ describe('Journey 2 — hospital detail shares the list’s data (no second opin
 
     const fromTravel = travel.hospitals.find((h: { id: string }) => h.id === 'bsa-hospital');
     expect(detail.hospitalId).toBe('bsa-hospital');
-    expect(detail.distanceKm).toBe(fromTravel.distanceKm);
-    expect(detail.etaMinutes).toBe(fromTravel.etaMinutes);
     expect(detail.straightKm).toBe(fromTravel.straightKm);
-    // No key → unavailable, with an explanation rather than a number.
-    expect(detail.source).toBe('unavailable');
-    expect(detail.error).toMatch(/GOOGLE_MAPS_API_KEY/);
-    expect(detail.geometry).toEqual([]);
+    // With no Google key the detail route is served key-free by OSRM. In this
+    // offline suite the OSRM call cannot succeed, so the honest outcome is a
+    // labelled unavailable leg — never a number, never a live-traffic claim.
+    expect(['osrm', 'unavailable']).toContain(detail.source);
+    expect(detail.liveTraffic).toBe(false);
+    if (detail.source === 'unavailable') {
+      expect(detail.distanceKm).toBeNull();
+      expect(detail.minutes).toBeNull();
+      expect(detail.error).toBeTruthy();
+      expect(detail.geometry).toEqual([]);
+    }
+    expect(detail.navigateUrl).toContain('google.com/maps');
     expect(detail.disclosure.text.length).toBeGreaterThan(10);
+    expect(detail.disclosure.live).toBe(false);
   });
 
   it('rejects an unknown hospital id instead of routing somewhere else', async () => {

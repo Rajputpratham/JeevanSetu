@@ -18,6 +18,9 @@ import { useUserLocation } from '@/lib/useLocation';
 import { useLang, DictKey } from '@/lib/i18n';
 import FinderDistanceBadge, { type FinderDistance } from '@/components/hospitals/FinderDistanceBadge';
 import { tFacility, tSpeciality } from '@/lib/i18n-data';
+import { SchemeBadgesCompact } from '@/components/schemes/SchemeBadges';
+import CostPreviewCompact, { type CostPreviewPayload } from '@/components/costs/CostPreview';
+import type { SchemeBadgeData } from '@/lib/schemes';
 
 export type EnrichedHospital = Hospital & {
   /** Google Routes driving distance in km. null = unknown (never guessed). */
@@ -49,6 +52,15 @@ interface Props {
    * instead of flashing the unavailable fallback before results arrive.
    */
   distancePending?: boolean;
+  /** Scheme empanelment rows for this exact branch (see lib/schemes). */
+  schemeBadges?: SchemeBadgeData[];
+  /** Compact treatment × hospital cost preview; omitted when no treatment is chosen. */
+  costPreview?: {
+    payload: CostPreviewPayload | null;
+    treatmentName: string;
+    loading: boolean;
+    failed?: boolean;
+  } | null;
 }
 
 const PROFILE_KEY: Record<Hospital['costProfile'], DictKey> = {
@@ -66,6 +78,8 @@ export default function HospitalCard({
   selected = false,
   onSelect,
   distancePending = false,
+  schemeBadges,
+  costPreview,
 }: Props) {
   const { t, lang } = useLang();
   const { location } = useUserLocation();
@@ -232,7 +246,21 @@ export default function HospitalCard({
         )}
       </div>
 
-      {hospital.facilities.length > 0 && <p className="mt-2 text-xs text-slate-600">{hospital.facilities.slice(0,3).map(f => tFacility(f,lang)).join(' · ')}</p>}
+
+      {schemeBadges && schemeBadges.length > 0 && <SchemeBadgesCompact items={schemeBadges} />}
+
+      {hospital.facilities.length > 0 && (
+        <p className="mt-2 text-xs text-slate-600">{hospital.facilities.slice(0, 3).map((f) => tFacility(f, lang)).join(' · ')}</p>
+      )}
+
+      {costPreview && (
+        <CostPreviewCompact
+          preview={costPreview.payload}
+          treatmentName={costPreview.treatmentName}
+          loading={costPreview.loading}
+          failed={costPreview.failed}
+        />
+      )}
       <div
         className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3"
         onClick={(e) => e.stopPropagation()}
