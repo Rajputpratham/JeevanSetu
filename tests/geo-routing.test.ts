@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import { searchIndianLocalities } from '@/data/localities';
 import {
   haversineKm,
@@ -15,8 +15,9 @@ import { isInsideBounds } from '@/data/hospital-locations';
  *
  * Everything that used to live here as a *model* (tortuosity factors, "urban
  * speed" assumptions, synthetic corridors) has been deleted from the product:
- * driving distance now comes only from the Google Routes API. What remains to
- * test is the gazetteer and the display formatters.
+ * a driving distance now comes only from a real routing provider (Google Routes
+ * when a key is configured, otherwise key-free OSRM), never from a local
+ * estimate. What remains to test is the gazetteer and the display formatters.
  */
 
 describe('Loop A — offline gazetteer geocoding', () => {
@@ -103,9 +104,18 @@ describe('Loop A — Google Maps links', () => {
 describe('Legacy modelling code is gone, not merely unused', () => {
   beforeAll(() => {
     vi.stubEnv('GOOGLE_MAPS_API_KEY', '');
+    vi.stubEnv('OSRM_BASE_URL', '');
   });
   afterAll(() => {
     vi.unstubAllEnvs();
+  });
+
+  beforeEach(() => {
+    // Offline simulation: no routing provider may be reached from this suite.
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('lib/geo no longer exports an estimated-urban-model distance function', async () => {
@@ -117,7 +127,13 @@ describe('Legacy modelling code is gone, not merely unused', () => {
   it('lib/routing no longer synthesizes corridors for the app', async () => {
     const routing = await import('@/lib/routing');
     expect(routing).toBeDefined();
-    // /api/route serves Google data; the synthetic fallback must not be reachable.
+    expect('buildSyntheticRoute' in routing).toBe(false);
+  });
+
+  it('never falls back to a synthesised distance when every provider fails', async () => {
+    // Hermetic: this test must not depend on whether the machine running it can
+    // reach the public OSRM demo host. A real provider outage is simulated by
+    // making every outbound request fail.
     const apiRoute = await import('@/app/api/route/route');
     const res = await apiRoute.GET(
       new (await import('next/server')).NextRequest(
@@ -125,9 +141,13 @@ describe('Legacy modelling code is gone, not merely unused', () => {
       ),
     );
     const data = await res.json();
-    // With no key: honest "unavailable" and NO distance number.
+    // No provider reachable: honest "unavailable", NO distance, NO geometry.
     expect(data.source).toBe('unavailable');
     expect(data.distanceKm).toBeNull();
+    expect(data.minutes).toBeNull();
+    expect(data.etaMinutes).toBeNull();
+    expect(data.liveTraffic).toBe(false);
     expect(data.geometry ?? []).toHaveLength(0);
+    expect(data.navigateUrl).toContain('google.com/maps');
   });
 });

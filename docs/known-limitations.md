@@ -109,7 +109,8 @@ the exact steps a maintainer must take to fill them.
 | --- | --- |
 | `npx tsc --noEmit` | clean |
 | `npx eslint .` | 0 problems |
-| `npm test` (`vitest run`) | 239 passed, 6 skipped |
+| `npm test` (`vitest run`) | 240 passed, 6 skipped |
 | `npm run build` | success, 34 hospital pages prerendered |
 | Live `curl` of `/api/schemes`, `/api/cost-preview`, `/api/route`, `/api/bills` | checked in the dev server |
+| Offline guarantee | `tests/setup-network.ts` fails any external HTTP call, so the suite cannot depend on a reachable public host |
 | Real Chromium journeys | **not possible in this sandbox** — `npx playwright install chromium` fails to download (egress blocked) and the only available Chromium bundle is missing `libnss3`/`libnspr4`. Journeys are covered by jsdom component tests that render the real client components (`tests/journey-ui.test.tsx`) plus API-level tests (`tests/schemes-costs-bills.test.ts`). |
