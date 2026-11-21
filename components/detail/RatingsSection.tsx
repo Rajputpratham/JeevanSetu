@@ -2,11 +2,15 @@
 import { FormEvent, useCallback, useEffect, useState } from 'react';
 import {
   Star, ShieldCheck, ExternalLink, MessageSquarePlus, AlertCircle, CheckCircle2, Info, Loader2,
+  IndianRupee,
 } from 'lucide-react';
 import { useLang } from '@/lib/i18n';
 import type { CommunityScoreSummary } from '@/lib/ratings';
 import type { CommunityReview } from '@/data/reviews';
 import type { GoogleRatingResponse } from '@/app/api/google-ratings/route';
+import BillAmountForm from '@/components/detail/BillAmountForm';
+import BillObservations from '@/components/detail/BillObservations';
+import type { PublicBillObservation } from '@/lib/review-bills';
 
 interface Props {
   hospitalId: string;
@@ -19,6 +23,9 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
   const [reviews, setReviews] = useState<CommunityReview[]>([]);
   const [googleData, setGoogleData] = useState<GoogleRatingResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [bills, setBills] = useState<PublicBillObservation[]>([]);
+  const [billsLoading, setBillsLoading] = useState(true);
+  const [billFormOpen, setBillFormOpen] = useState(false);
 
   // Review form state
   const [formOpen, setFormOpen] = useState(false);
@@ -33,6 +40,9 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  /** Place-search link built from the name only — no fabricated place id. */
+  const googleMapsHref = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hospitalName)}`;
 
   const loadRatings = useCallback(async () => {
     setLoading(true);
@@ -50,6 +60,12 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
         const googJson = await googRes.json();
         setGoogleData(googJson);
       }
+      const billsRes = await fetch(`/api/bills?hospitalId=${encodeURIComponent(hospitalId)}`);
+      if (billsRes.ok) {
+        const billsJson = await billsRes.json();
+        setBills(billsJson.bills ?? []);
+      }
+      setBillsLoading(false);
     } catch {
       // Non-fatal
     } finally {
@@ -117,6 +133,15 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
         >
           <MessageSquarePlus size={15} /> {t('writeReviewTitle')}
         </button>
+        <button
+          type="button"
+          onClick={() => setBillFormOpen((v) => !v)}
+          aria-expanded={billFormOpen}
+          className="btn-secondary !py-2 !px-3.5 !text-xs !min-h-[40px]"
+          data-testid="open-bill-form"
+        >
+          <IndianRupee size={15} /> {t('billFormTitle')}
+        </button>
       </div>
 
       {loading ? (
@@ -125,7 +150,11 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
           <div className="h-36 rounded-2xl bg-slate-100" />
         </div>
       ) : (
-        <div className="mt-4 grid md:grid-cols-2 gap-4">
+        <div
+          className={`mt-4 grid gap-4 ${
+            googleData?.status === 'connected' && googleData.rating !== null ? 'md:grid-cols-2' : ''
+          }`}
+        >
           {/* 1. Separate JeevanSetu IMDb-style Community Score Card */}
           <div
             className="rounded-2xl border-2 border-amber-200 bg-amber-50/40 p-4 flex flex-col justify-between"
@@ -208,22 +237,23 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
             )}
           </div>
 
-          {/* 2. Separate Google Places Rating Card (Never mixed with Community Score) */}
-          <div
-            className="rounded-2xl border-2 border-slate-200 bg-slate-50/70 p-4 flex flex-col justify-between"
-            data-testid="google-rating-card"
-          >
-            <div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
-                  {t('googleRatingLabel')}
-                </span>
-                <span className="rounded-full bg-white border border-slate-300 px-2.5 py-0.5 text-[10px] font-bold text-slate-700">
-                  {googleData?.attribution ?? 'Google Maps'}
-                </span>
-              </div>
+          {/* 2. Google Places — only when a permitted integration actually returned
+                 a rating. Otherwise a compact Maps link, never a large empty box. */}
+          {googleData?.status === 'connected' && googleData.rating !== null ? (
+            <div
+              className="rounded-2xl border-2 border-slate-200 bg-slate-50/70 p-4 flex flex-col justify-between"
+              data-testid="google-rating-card"
+            >
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
+                    {t('googleRatingLabel')}
+                  </span>
+                  <span className="rounded-full bg-white border border-slate-300 px-2.5 py-0.5 text-[10px] font-bold text-slate-700">
+                    {googleData.attribution ?? 'Google Maps'}
+                  </span>
+                </div>
 
-              {googleData?.status === 'connected' && googleData.rating !== null ? (
                 <div className="mt-3">
                   <div className="flex items-baseline gap-2.5">
                     <span className="text-4xl font-black text-slate-900">
@@ -248,33 +278,42 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
                     </ul>
                   )}
                 </div>
-              ) : (
-                <div className="mt-3 rounded-xl bg-white border border-slate-200 p-3.5">
-                  <p className="text-xs font-bold text-slate-800">
-                    Live Google rating unavailable
-                  </p>
-                  <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">
-                    {lang === 'hi' ? 'सार्वजनिक रेटिंग और समीक्षाएँ देखने के लिए Google Maps खोलें।' : 'Open Google Maps to check public ratings and reviews.'}
-                  </p>
-                </div>
-              )}
-            </div>
+              </div>
 
-            <div className="mt-4 pt-3 border-t border-slate-200 flex items-center justify-between gap-2">
-              <span className="text-[10px] text-slate-500">Kept strictly separate from Community Score</span>
+              <div className="mt-4 pt-3 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                <span className="text-[10px] text-slate-500">{t('googleRatingSeparateNote')}</span>
+                <a
+                  href={googleData.googleMapsUrl ?? googleMapsHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs font-extrabold text-brand-800 hover:underline"
+                >
+                  {t('googleRatingCompactTitle')} <ExternalLink size={13} />
+                </a>
+              </div>
+            </div>
+          ) : (
+            <div
+              className="rounded-2xl border border-slate-200 bg-white px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2"
+              data-testid="google-rating-compact"
+            >
+              <div className="min-w-0">
+                <p className="text-[11px] font-extrabold uppercase tracking-wider text-slate-500">
+                  {t('googleRatingCompactTitle')}
+                </p>
+                <p className="text-[11px] text-slate-600">{t('googleRatingCompactBody')}</p>
+              </div>
               <a
-                href={
-                  googleData?.googleMapsUrl ??
-                  `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(hospitalName)}`
-                }
+                href={googleData?.googleMapsUrl ?? googleMapsHref}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-xs font-extrabold text-brand-800 hover:underline"
+                className="inline-flex min-h-[36px] items-center gap-1 rounded-lg border border-brand-300 px-2.5 py-1.5 text-[11px] font-extrabold text-brand-800 hover:bg-brand-50"
+                data-testid="google-maps-link"
               >
-                View on Google Maps <ExternalLink size={13} />
+                View on Google Maps <ExternalLink size={12} />
               </a>
             </div>
-          </div>
+          )}
         </div>
       )}
 
@@ -452,6 +491,15 @@ export default function RatingsSection({ hospitalId, hospitalName }: Props) {
           ))}
         </div>
       )}
+
+      {billFormOpen && (
+        <BillAmountForm
+          hospitalId={hospitalId}
+          onSubmitted={(bill) => setBills((current) => [bill, ...current])}
+        />
+      )}
+
+      <BillObservations bills={bills} loading={billsLoading} />
 
       <p className="mt-4 text-[11px] text-slate-500 flex items-start gap-1.5">
         <Info size={13} className="mt-0.5 shrink-0" />

@@ -1,10 +1,10 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import {
   MapPin, Navigation, PhoneCall, BedDouble, Stethoscope, CheckCircle2, Building2, Landmark,
-  Siren, Info, Mail, XCircle, BadgeCheck, HelpCircle, Clock, Route as RouteIcon,
+  Siren, Info, Mail, XCircle, BadgeCheck, HelpCircle, Route as RouteIcon,
 } from 'lucide-react';
 import { Hospital } from '@/data/types';
 import DetailActions from '@/components/detail/DetailActions';
@@ -15,9 +15,13 @@ import { tFacility, tHospitalMeta, tPresetLabel, tSpeciality } from '@/lib/i18n-
 import { useUserLocation } from '@/lib/useLocation';
 import LocationControls from '@/components/LocationControls';
 import MapPanel from '@/components/maps/MapPanel';
-import { formatDrivingKm, formatDuration, directionsFromToUrl, formatStraightLineKm, haversineKm } from '@/lib/geo';
+import { directionsFromToUrl } from '@/lib/geo';
 import { distanceStrings, locationStrings } from '@/lib/ui-strings';
-import type { RouteDetailPayload } from '@/components/hospitals/DiscoveryClient';
+import RoutePanel from '@/components/detail/RoutePanel';
+import SchemeSection from '@/components/schemes/SchemeBadges';
+import TreatmentCostSection from '@/components/detail/TreatmentCostSection';
+import { schemeBadges, ayushmanAccepted } from '@/lib/schemes';
+import { photoFor, NEUTRAL_ILLUSTRATION } from '@/data/hospital-images';
 
 const COST_KEY: Record<Hospital['costProfile'], DictKey> = {
   'very-low': 'costLabelVeryLow',
@@ -31,63 +35,17 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
   const { location, hasLocation } = useUserLocation();
   const ds = distanceStrings(lang);
   const ls = locationStrings(lang);
-  const [routeData, setRouteData] = useState<RouteDetailPayload | null>(null);
-  const [routeBusy, setRouteBusy] = useState(false);
-  const [altIndex, setAltIndex] = useState(0);
-
   const isGovt = h.type === 'government';
-  const cover = isGovt ? '/images/hospital-govt.jpg' : '/images/hospital-private.jpg';
+  const photo = photoFor(h.id);
+  const [imageFailed, setImageFailed] = useState(false);
+  const schemes = schemeBadges(h, { lang: lang === 'hi' ? 'hi' : 'en' });
+  const ayushman = ayushmanAccepted(h);
 
   const tagline = tHospitalMeta(h.id, 'tagline', h.tagline, lang);
   const ownershipNote = tHospitalMeta(h.id, 'ownershipNote', h.ownershipNote, lang);
   const emergencyNote = tHospitalMeta(h.id, 'emergencyNote', h.emergencyNote, lang);
   const opdTimings = tHospitalMeta(h.id, 'opdTimings', h.opdTimings, lang);
   const dataNote = tHospitalMeta(h.id, 'dataNote', h.dataNote, lang);
-
-  /** Direct-line fallback is computed locally but ALWAYS labelled as such. */
-  const straightKm = useMemo(() => {
-    if (!hasLocation || typeof location.lat !== 'number' || typeof location.lng !== 'number') return null;
-    return Number(haversineKm(location.lat, location.lng, h.lat, h.lng).toFixed(1));
-  }, [hasLocation, location.lat, location.lng, h.lat, h.lng]);
-
-  /**
-   * Single authoritative route for this hospital, fetched by hospital id so the
-   * server resolves the verified destination coordinates. Supports choosing an
-   * alternative route, which then becomes the ONE route every number refers to.
-   */
-  useEffect(() => {
-    if (!hasLocation || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
-      setRouteData(null);
-      return;
-    }
-    let cancelled = false;
-    const controller = new AbortController();
-    setRouteBusy(true);
-    fetch(
-      `/api/route?fromLat=${location.lat}&fromLng=${location.lng}&hospitalId=${encodeURIComponent(h.id)}&alt=${altIndex}&lang=${lang}`,
-      { signal: controller.signal },
-    )
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: RouteDetailPayload | null) => {
-        if (!cancelled) setRouteData(d);
-      })
-      .catch(() => {
-        if (!cancelled) setRouteData(null);
-      })
-      .finally(() => {
-        if (!cancelled) setRouteBusy(false);
-      });
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [hasLocation, location.lat, location.lng, h.id, altIndex, lang]);
-
-  const effectiveRoadKm = routeData?.distanceKm ?? null;
-  const effectiveEtaMin = routeData?.etaMinutes ?? null;
-  const trafficImpact = routeData?.trafficImpactMinutes ?? null;
-  const drivingText = formatDrivingKm(effectiveRoadKm, lang);
-  const straightText = formatStraightLineKm(straightKm, lang);
 
   const originLabel = hasLocation
     ? location.source === 'geolocation'
@@ -167,51 +125,9 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
             </div>
           </div>
 
-          {/* Google Routes driving distance + traffic-aware ETA */}
-          <div
-            className="rounded-2xl border border-brand-200 bg-brand-50 px-4 py-3 max-w-full md:max-w-[45%]"
-            data-testid="detail-travel-summary"
-          >
-            <div className="flex items-center gap-4">
-              <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-brand-700">
-                  {ds.drivingDistance}
-                </p>
-                <p className="text-xl font-black text-brand-950" data-testid="detail-distance">
-                  {routeBusy ? '…' : drivingText ?? '—'}
-                </p>
-              </div>
-              <div className="h-8 w-px bg-brand-200" aria-hidden="true" />
-              <div>
-                <p className="text-[10px] font-extrabold uppercase tracking-wider text-brand-700">
-                  {ds.eta}
-                </p>
-                <p className="text-xl font-black text-brand-950 flex items-center gap-1" data-testid="detail-eta">
-                  {effectiveEtaMin !== null ? (
-                    <>
-                      <Clock size={16} className="text-brand-700" /> ~{formatDuration(effectiveEtaMin, lang)}
-                    </>
-                  ) : (
-                    <span className="text-sm font-bold text-amber-800">{ds.noLiveTraffic}</span>
-                  )}
-                </p>
-              </div>
-            </div>
-            {trafficImpact !== null && (
-              <p className="mt-1.5 text-[11px] font-semibold text-amber-900" data-testid="detail-traffic-impact">
-                {ds.trafficImpact}: +{trafficImpact} min
-              </p>
-            )}
-            {!drivingText && !routeBusy && (
-              <p className="mt-1.5 text-[11px] font-semibold text-amber-900" data-testid="detail-distance-unavailable">
-                {hasLocation ? ds.distanceUnavailableWhy : ls.notSetWhy}
-              </p>
-            )}
-            {straightText && (
-              <p className="mt-1 text-[10px] text-slate-500">
-                {ds.straightLine}: {straightText}
-              </p>
-            )}
+          {/* Road distance + estimated drive time (key-free OSRM, Google when configured) */}
+          <div className="w-full max-w-full md:max-w-[46%]">
+            <RoutePanel hospital={h} />
           </div>
         </div>
         {ownershipNote && (
@@ -222,18 +138,45 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
       <div className="mt-5 grid gap-5 lg:grid-cols-3 items-start">
         {/* ─── Main column ─── */}
         <div className="lg:col-span-2 flex flex-col gap-5">
-          {/* Representative image */}
-          <figure className="card overflow-hidden">
-            <Image
-              src={cover}
-              alt={isGovt ? t('repImageAltGovt') : t('repImageAltPrivate')}
-              width={1100}
-              height={560}
-              className="w-full h-48 sm:h-56 object-cover"
-            />
-            <figcaption className="px-4 py-2 text-[11px] text-slate-500 border-t border-slate-100">
-              {t('repImageCaption')}
-            </figcaption>
+          {/* Branch visual — a verified photo only, otherwise a clearly generic illustration */}
+          <figure className="card overflow-hidden" data-testid="hospital-visual">
+            {photo && !imageFailed ? (
+              <>
+                <Image
+                  src={photo.src}
+                  alt={photo.alt}
+                  width={photo.width}
+                  height={photo.height}
+                  onError={() => setImageFailed(true)}
+                  className="w-full h-48 sm:h-56 object-cover"
+                  sizes="(max-width: 1024px) 100vw, 66vw"
+                />
+                <figcaption className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-500">
+                  {t('imagePhotoCaption')} ·{' '}
+                  <a href={photo.sourceUrl} target="_blank" rel="noopener noreferrer" className="underline">
+                    {t('imagePhotoSource')}
+                  </a>
+                  {photo.rights.kind === 'cc-by' || photo.rights.kind === 'cc-by-sa' || photo.rights.kind === 'permission'
+                    ? ` · ${photo.rights.attribution}`
+                    : ''}
+                </figcaption>
+              </>
+            ) : (
+              <>
+                <Image
+                  src={NEUTRAL_ILLUSTRATION.src}
+                  alt={t('imageIllustrationAlt')}
+                  width={NEUTRAL_ILLUSTRATION.width}
+                  height={NEUTRAL_ILLUSTRATION.height}
+                  className="w-full h-40 sm:h-48 bg-brand-50/60 object-contain"
+                  sizes="(max-width: 1024px) 100vw, 66vw"
+                  data-testid="hospital-illustration"
+                />
+                <figcaption className="border-t border-slate-100 px-4 py-2 text-[11px] text-slate-500" data-testid="visual-caption">
+                  {imageFailed ? t('imageLoadFailed') : t('imageIllustrationCaption')}
+                </figcaption>
+              </>
+            )}
           </figure>
 
           {/* Address + Route Map */}
@@ -253,14 +196,7 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
 
             <div className="mt-4">
               <MapPanel
-                hospitals={[
-                  {
-                    ...h,
-                    roadKm: effectiveRoadKm,
-                    distanceKm: effectiveRoadKm,
-                    etaMinutes: effectiveEtaMin,
-                  },
-                ]}
+                hospitals={[h]}
                 center={{ lat: h.lat, lng: h.lng }}
                 zoom={13}
                 userLocation={
@@ -269,8 +205,6 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
                     : null
                 }
                 selectedHospitalId={h.id}
-                routeGeometry={routeData?.geometry ?? null}
-                showTraffic
               />
             </div>
 
@@ -278,47 +212,12 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
               <LocationControls compact />
             </div>
 
-            {routeData?.alternatives && routeData.alternatives.length > 1 && (
-              <div className="mt-3" data-testid="alternative-routes">
-                <p className="text-[11px] font-bold uppercase tracking-wide text-slate-500">{ds.alternatives}</p>
-                <div className="mt-1.5 flex flex-wrap gap-1.5">
-                  {routeData.alternatives.map((alt, i) => (
-                    <button
-                      key={`${alt.distanceKm}-${i}`}
-                      type="button"
-                      onClick={() => setAltIndex(i)}
-                      aria-pressed={altIndex === i}
-                      className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold ${
-                        altIndex === i
-                          ? 'border-brand-700 bg-brand-700 text-white'
-                          : 'border-slate-200 text-slate-700 hover:border-brand-400'
-                      }`}
-                    >
-                      {alt.distanceKm.toFixed(1)} km · ~{alt.etaMinutes} min
-                      {alt.description ? ` · ${alt.description}` : ''}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-1 text-[10px] text-slate-500">{ds.sameRouteNote}</p>
-              </div>
-            )}
-
-            {routeData?.disclosure.text && (
-              <p className="mt-2 text-[11px] text-slate-500">
-                {routeData.disclosure.text}
-                {routeData.computedAt && (
-                  <> · {ds.lastUpdated} {new Date(routeData.computedAt).toLocaleTimeString()}</>
-                )}
-              </p>
-            )}
-
             <div className="mt-4 flex flex-wrap gap-2">
               <a
                 href={
-                  routeData?.navigateUrl ??
-                  (hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
+                  hasLocation && typeof location.lat === 'number' && typeof location.lng === 'number'
                     ? directionsFromToUrl(location.lat, location.lng, h.lat, h.lng, h.shortName)
-                    : `https://www.google.com/maps/dir/?api=1&destination=${h.lat},${h.lng}&travelmode=driving`)
+                    : `https://www.google.com/maps/dir/?api=1&destination=${h.lat},${h.lng}&travelmode=driving`
                 }
                 target="_blank"
                 rel="noopener noreferrer"
@@ -328,6 +227,12 @@ export default function HospitalDetailClient({ hospital: h }: { hospital: Hospit
               </a>
             </div>
           </section>
+
+          {/* Official scheme empanelment, per scheme, with evidence */}
+          <SchemeSection items={schemes} hospitalName={h.name} ayushmanAccepted={ayushman} />
+
+          {/* Treatment × this branch cost evidence */}
+          <TreatmentCostSection hospitalId={h.id} />
 
           {/* IMDb-style Community Score + Google Ratings + Moderated Reviews */}
           <RatingsSection hospitalId={h.id} hospitalName={h.name} />

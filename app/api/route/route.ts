@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HOSPITALS, getHospitalById } from '@/data/hospitals';
 import { resolveHospitalGeo } from '@/data/hospital-locations';
-import { getRouteDetail } from '@/lib/travel';
+import { getRouteDetail, hasServerMapsKey } from '@/lib/travel';
+import { getRoadRouteDetail, osrmBaseUrl } from '@/lib/osrm';
 import { cached, travelCacheKey } from '@/lib/travel-cache';
 
 export const dynamic = 'force-dynamic';
@@ -9,18 +10,22 @@ export const dynamic = 'force-dynamic';
 const CACHE_TTL_MS = 60_000;
 
 /**
- * GET /api/route — full driving route for ONE hospital.
+ * GET /api/route — driving route for ONE hospital.
  *
- * Source of truth: Google Routes API v2. Query by stable hospital id (preferred)
- * or raw coordinates. Nothing is approximated when Google is unavailable.
+ * SOURCE LADDER (strict, never mixed):
+ *   1. Google Routes API v2 — only when GOOGLE_MAPS_API_KEY is configured. It is
+ *      the ONLY source allowed to claim live traffic.
+ *   2. OSRM (key-free)      — routed road distance + estimated drive time. No
+ *      live traffic, so the UI must label it "Estimated drive time".
+ *   3. unavailable          — compact "Road route unavailable" fallback with the
+ *      labelled straight-line distance. Never a guessed road figure.
  *
- * Query: fromLat, fromLng, hospitalId | toLat, toLng, alt (route index), lang
+ * Query: fromLat, fromLng, hospitalId | toLat, toLng, lang
  */
 export async function GET(request: NextRequest) {
   const sp = request.nextUrl.searchParams;
   const fromLat = parseFloat(sp.get('fromLat') ?? '');
   const fromLng = parseFloat(sp.get('fromLng') ?? '');
-  const altIndex = parseInt(sp.get('alt') ?? '0', 10);
 
   if (!Number.isFinite(fromLat) || !Number.isFinite(fromLng)) {
     return NextResponse.json({ error: 'A valid origin is required.', code: 'ORIGIN_REQUIRED' }, { status: 400 });
@@ -28,8 +33,8 @@ export async function GET(request: NextRequest) {
 
   const requestedId = (sp.get('hospitalId') ?? '').trim();
   let hospital = getHospitalById(requestedId);
-  let toLat = parseFloat(sp.get('toLat') ?? '');
-  let toLng = parseFloat(sp.get('toLng') ?? '');
+  const toLat = parseFloat(sp.get('toLat') ?? '');
+  const toLng = parseFloat(sp.get('toLng') ?? '');
 
   if (!hospital) {
     // An explicit but unknown hospitalId is a client bug, not a request for
@@ -72,39 +77,90 @@ export async function GET(request: NextRequest) {
   }
 
   const geo = resolveHospitalGeo(hospital);
-  toLat = geo.lat;
-  toLng = geo.lng;
 
   if (Math.abs(fromLat) > 90 || Math.abs(fromLng) > 180) {
     return NextResponse.json({ error: 'Origin coordinates are out of range.', code: 'BAD_ORIGIN' }, { status: 400 });
   }
 
-  try {
-    const detail = await cached(
-      travelCacheKey(['route', fromLat, fromLng, hospital.id, altIndex]),
-      CACHE_TTL_MS,
-      () =>
-        getRouteDetail({
-          origin: { lat: fromLat, lng: fromLng },
-          hospital,
-          selectedIndex: Number.isFinite(altIndex) ? altIndex : 0,
-          language: sp.get('lang') === 'hi' ? 'hi-IN' : 'en-IN',
-        }),
-    );
+  const origin = { lat: fromLat, lng: fromLng };
+  const hospitalMeta = {
+    id: hospital.id,
+    name: hospital.name,
+    shortName: hospital.shortName,
+    lat: geo.lat,
+    lng: geo.lng,
+    address: geo.address,
+    coordinateConfidence: geo.confidence,
+    coordinateNote: geo.note,
+  };
 
+  try {
+    // ── 1. Google Routes (only when configured) ───────────────────────────────
+    if (hasServerMapsKey()) {
+      const detail = await cached(
+        travelCacheKey(['route', fromLat, fromLng, hospital.id, 0]),
+        CACHE_TTL_MS,
+        () =>
+          getRouteDetail({
+            origin,
+            hospital,
+            selectedIndex: 0,
+            language: sp.get('lang') === 'hi' ? 'hi-IN' : 'en-IN',
+          }),
+      );
+      if (detail.source !== 'unavailable') {
+        return NextResponse.json({
+          ...detail,
+          liveTraffic: true,
+          provider: 'Google Routes API',
+          googleConfigured: true,
+          osrmConfigured: true,
+          hospital: hospitalMeta,
+          origin,
+        });
+      }
+      // Google failed (quota/restriction/network) — fall through to OSRM rather
+      // than showing a dead panel.
+      const fallback = await cached(
+        travelCacheKey(['osrm-route', fromLat, fromLng, hospital.id]),
+        CACHE_TTL_MS,
+        () => getRoadRouteDetail(origin, hospital),
+      );
+      return NextResponse.json({
+        ...fallback,
+        googleConfigured: true,
+        googleError: detail.error,
+        detailSource: 'google-failed',
+        osrmConfigured: true,
+        hospital: hospitalMeta,
+        origin,
+      });
+    }
+
+    // ── 2. Key-free OSRM ─────────────────────────────────────────────────────
+    const road = await cached(
+      travelCacheKey(['osrm-route', fromLat, fromLng, hospital.id]),
+      CACHE_TTL_MS,
+      () => getRoadRouteDetail(origin, hospital),
+    );
     return NextResponse.json({
-      ...detail,
-      hospital: {
-        id: hospital.id,
-        name: hospital.name,
-        shortName: hospital.shortName,
-        lat: geo.lat,
-        lng: geo.lng,
-        address: geo.address,
-        coordinateConfidence: geo.confidence,
-        coordinateNote: geo.note,
+      ...road,
+      // The old payload shape is still consumed by the map/alternatives UI.
+      etaMinutes: road.minutes,
+      staticMinutes: road.minutes,
+      trafficImpactMinutes: null,
+      errorStatus: road.error,
+      disclosure: {
+        text: road.error
+          ? 'No road route could be computed right now, so no road distance or drive time is shown.'
+          : 'Road distance and estimated drive time from OSRM. This is not live traffic.',
+        live: false,
       },
-      origin: { lat: fromLat, lng: fromLng },
+      googleConfigured: false,
+      osrmConfigured: true,
+      osrmBaseUrl: osrmBaseUrl(),
+      hospital: hospitalMeta,
+      origin,
     });
   } catch (err) {
     console.error('[api/route]', err);

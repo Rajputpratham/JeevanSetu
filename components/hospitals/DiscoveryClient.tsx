@@ -15,6 +15,10 @@ import HospitalCard, { EnrichedHospital } from '@/components/HospitalCard';
 import MapPanel from '@/components/maps/MapPanel';
 import FinderLocationControls from '@/components/hospitals/FinderLocationControls';
 import VoiceSearchButton from '@/components/VoiceSearchButton';
+import TreatmentSelector from '@/components/hospitals/TreatmentSelector';
+import { useCostPreviews } from '@/hooks/useCostPreviews';
+import { useTreatmentSelection } from '@/lib/treatment-selection';
+import { schemeBadges } from '@/lib/schemes';
 import { useLang } from '@/lib/i18n';
 import { tSpeciality } from '@/lib/i18n-data';
 import { useCompare } from '@/lib/compare';
@@ -51,6 +55,8 @@ interface DiscoveryProps {
   initialRadius?: number;
   initialEmpty?: boolean;
   initialSavedOnly?: boolean;
+  /** Treatment carried over from the cost estimator (?treatment=). */
+  initialTreatment?: string | null;
 }
 
 const locationPath = (query: string) => `/hospitals${query ? '?' + query : ''}`;
@@ -64,12 +70,24 @@ export default function DiscoveryClient({
   initialRadius = 25,
   initialEmpty = false,
   initialSavedOnly = false,
+  initialTreatment = null,
 }: DiscoveryProps) {
   const { t, lang } = useLang();
   const { ids: compareIds } = useCompare();
   const { savedIds } = useSavedHospitals();
   const originControls = useUserLocation();
   const { location } = originControls;
+  const treatmentSelection = useTreatmentSelection();
+  const treatmentId = treatmentSelection.treatmentId;
+
+  // A treatment arriving in the URL wins over the session value so a shared link
+  // shows the same previews for everyone.
+  useEffect(() => {
+    if (initialTreatment && initialTreatment !== treatmentSelection.treatmentId) {
+      treatmentSelection.setTreatmentId(initialTreatment);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTreatment]);
 
   const [q, setQ] = useState(initialQ);
   const [type, setType] = useState<'all' | 'government' | 'private'>(initialType);
@@ -152,9 +170,10 @@ export default function DiscoveryClient({
     if (savedOnly) params.set('saved','1');
     if (radius !== 25) params.set('radius', String(radius));
     if (sort !== 'distance') params.set('sort', sort);
+    if (treatmentId) params.set('treatment', treatmentId);
     const search = params.toString();
     window.history.replaceState(null, '', locationPath(search));
-  }, [urlReady,q,type,speciality,emergencyOnly,savedOnly,radius,sort]);
+  }, [urlReady,q,type,speciality,emergencyOnly,savedOnly,radius,sort,treatmentId]);
 
   const candidates = useMemo(() => {
     if (!results) return null;
@@ -191,6 +210,15 @@ export default function DiscoveryClient({
     if (!result) return location ? 'Calculating…' : 'Enable location to see distance';
     return formatDistance(result) + (result.source === 'road' ? ' (estimated)' : '');
   }, [distances, location, verifiedIds]);
+  const visibleIds = useMemo(() => (displayedResults ?? []).map((h) => h.id), [displayedResults]);
+  const costPreviews = useCostPreviews(treatmentId, visibleIds, lang);
+  const schemeBadgesByHospital = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof schemeBadges>>();
+    for (const h of displayedResults ?? []) {
+      map.set(h.id, schemeBadges(h, { lang: lang === 'hi' ? 'hi' : 'en' }));
+    }
+    return map;
+  }, [displayedResults, lang]);
   const selectedHospital = displayedResults?.find((h) => h.id === selectedHospitalId);
   const selectedDistance = selectedHospital ? distances.get(selectedHospital.id) : undefined;
   const estimatesLoading = Boolean(location && destinations.some((h) => verifiedIds.has(h.id) && !distances.has(h.id)));
@@ -301,6 +329,15 @@ export default function DiscoveryClient({
             </p>
           )}
         </div>
+      </div>
+
+      {/* Treatment selector — drives the per-hospital cost previews below */}
+      <div className="mt-3">
+        <TreatmentSelector
+          value={treatmentId}
+          onChange={treatmentSelection.setTreatmentId}
+          fromEstimator={Boolean(initialTreatment) && initialTreatment === treatmentId}
+        />
       </div>
 
       {/* Empty search notice */}
@@ -615,6 +652,17 @@ export default function DiscoveryClient({
                 markerIndex={idx + 1}
                 selected={selectedHospitalId === h.id}
                 onSelect={handleSelectHospital}
+                schemeBadges={schemeBadgesByHospital.get(h.id)}
+                costPreview={
+                  treatmentId
+                    ? {
+                        payload: costPreviews.forHospital(h.id),
+                        treatmentName: costPreviews.treatmentName,
+                        loading: costPreviews.loading,
+                        failed: costPreviews.failed,
+                      }
+                    : null
+                }
                 finderDistance={{
                   origin: location,
                   verified: verifiedIds.has(h.id),
